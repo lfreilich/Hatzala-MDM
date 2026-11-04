@@ -18,7 +18,7 @@ from fastapi.responses import HTMLResponse, PlainTextResponse, RedirectResponse,
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
-from . import admins, config, db, provision, sso, walkiefleet
+from . import admins, claude_page, config, db, provision, sso, walkiefleet
 from .clients import ApiError, Headwind
 
 app = FastAPI(title="hbs-bridge", docs_url=None, redoc_url=None)
@@ -483,6 +483,10 @@ def admins_remove(request: Request, email: str = Form(...)):
         return _back(ok=f"{email} removed. " + "; ".join(notes))
     except Exception as e:
         return _back(error=str(e)[:300])
+
+
+# ------------------------------------------------------------------ hidden /claude page (owners only)
+claude_page.register(app, templates, _ctx)
 
 
 @app.get("/home", response_class=HTMLResponse)

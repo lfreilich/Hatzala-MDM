@@ -1,0 +1,13 @@
+[Unit]
+Description=HBS Claude agent (runs Claude Code for the ops dashboard /claude page)
+After=network.target
+
+[Service]
+ExecStart=/usr/bin/python3 /opt/hbs-addons/claude-agent/agent.py
+Restart=on-failure
+User=root
+Environment=HOME=/root
+Environment=PATH=/root/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+
+[Install]
+WantedBy=multi-user.target

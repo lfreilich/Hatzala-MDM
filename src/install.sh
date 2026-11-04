@@ -192,6 +192,7 @@ cp -f "$PKG_DIR/stack/docker-compose.yml" "$STACK/"
 cp -f "$PKG_DIR/stack/caddy/Caddyfile" "$STACK/caddy/"
 cp -f "$PKG_DIR/stack/authelia/configuration.yml.tpl" "$STACK/authelia/"
 rm -rf "$PREFIX/bridge"; cp -r "$PKG_DIR/bridge" "$PREFIX/bridge"
+rm -rf "$PREFIX/claude-agent"; cp -r "$PKG_DIR/claude-agent" "$PREFIX/claude-agent"
 install -m 755 "$PKG_DIR/hbs-addons" /usr/local/bin/hbs-addons
 mkdir -p "$STACK"/data/{caddy,caddy-config,apk,traccar/data,traccar/logs,rustdesk,nc-db,nextcloud,adguard/work,adguard/conf,bridge}
 
@@ -420,6 +421,12 @@ fi
 # ----------------------------------------------------------------------------- 8. bridge
 say "Starting hbs-bridge (Headwind sync + OTA provisioning)"
 compose up -d bridge >>"$LOG" 2>&1
+# Hidden /claude page (owners only): host service that runs Claude Code for the bridge
+[ -s "$STACK/secrets/claude_agent_token" ] || { head -c 48 /dev/urandom | base64 | tr -dc A-Za-z0-9 | head -c 48 >"$STACK/secrets/claude_agent_token"; chmod 600 "$STACK/secrets/claude_agent_token"; }
+install -m 644 "$PREFIX/claude-agent/hbs-claude-agent.service" /etc/systemd/system/hbs-claude-agent.service
+systemctl daemon-reload && systemctl enable hbs-claude-agent >/dev/null 2>&1 && systemctl restart hbs-claude-agent \
+  && ok "Claude agent running (/claude page)" || warn "Claude agent not running (systemctl status hbs-claude-agent)"
+[ -x /root/.local/bin/claude ] || command -v claude >/dev/null || warn "Claude Code isn't installed on this host, so /claude won't work"
 wait_http "http://127.0.0.1:8090/healthz" 60 && ok "Bridge running" || warn "Bridge not answering yet (hbs-addons logs bridge)"
 
 cat > /etc/cron.d/hbs-addons <<EOF

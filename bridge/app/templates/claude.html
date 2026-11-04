@@ -1,0 +1,90 @@
+{% extends "base.html" %}
+{% block body %}
+<style>
+#log{display:flex;flex-direction:column;gap:8px;max-height:65vh;overflow-y:auto;padding-right:4px}
+.msg{white-space:pre-wrap;word-break:break-word;line-height:1.5}
+.me{align-self:flex-end;background:var(--acc);color:var(--acc-ink);padding:8px 12px;border-radius:12px 12px 2px 12px;max-width:85%}
+.ai{background:var(--bg);border:1px solid var(--line);padding:8px 12px;border-radius:12px 12px 12px 2px;max-width:95%}
+details.tool{font-size:12px;color:var(--mute);border-left:2px solid var(--line);padding-left:8px}
+details.tool summary{cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+details.tool pre{white-space:pre-wrap;word-break:break-all;max-height:300px;overflow:auto;background:var(--bg);padding:6px;border-radius:6px;margin:4px 0}
+.note{font-size:12px;color:var(--mute)}
+#prompt{width:100%;min-height:80px;resize:vertical;font:inherit;padding:8px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--ink)}
+.bar{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:8px}
+#hist button{display:block;width:100%;text-align:left;margin-bottom:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.wrap{display:grid;grid-template-columns:1fr 260px;gap:16px}@media(max-width:800px){.wrap{grid-template-columns:1fr}}
+</style>
+<div class="wrap">
+<div class="card">
+  <h2>Claude <span class="pill">owners only</span></h2>
+  <p class="note">Ask for a change to the dashboard or the stack, in plain words. Claude works on the server itself, the same way as over SSH,
+    and can rebuild the bridge. The page may blink while the dashboard restarts; the job keeps going. Every request is logged.</p>
+  <div id="log"></div>
+  <div class="bar"><span id="state" class="note"></span></div>
+  <textarea id="prompt" placeholder="e.g. Add a column with the battery level to the Devices page" maxlength="20000"></textarea>
+  <div class="bar">
+    <button class="primary" id="send">Send</button>
+    <button id="stop" hidden>Stop</button>
+    <button id="new">New conversation</button>
+    <span class="note">Ctrl+Enter sends. <span id="sess"></span></span>
+  </div>
+</div>
+<div class="card"><h2>Earlier requests</h2><div id="hist" class="note">Loading...</div></div>
+</div>
+<script>
+const $=id=>document.getElementById(id), log=$('log');
+let job=null, after=0, session=null, timer=null, fails=0;
+const H={'X-HBS':'1','Content-Type':'application/json'};
+async function api(path,body){
+  const r=await fetch('/claude/api/'+path,body?{method:'POST',headers:H,body:JSON.stringify(body)}:{headers:H,cache:'no-store'});
+  let j={};try{j=await r.json()}catch(e){}
+  if(!r.ok)throw new Error(j.error||('HTTP '+r.status));return j;
+}
+function el(tag,cls,text){const e=document.createElement(tag);if(cls)e.className=cls;if(text!=null)e.textContent=text;return e}
+function add(e){const stick=log.scrollHeight-log.scrollTop-log.clientHeight<80;log.appendChild(e);if(stick)log.scrollTop=log.scrollHeight}
+function tool(summary,body){const d=el('details','tool');d.appendChild(el('summary',null,summary));if(body)d.appendChild(el('pre',null,body));add(d);return d}
+const toolEls={};
+function toolLabel(b){const i=b.input||{};
+  const arg=i.command||i.file_path||i.pattern||i.description||i.url||i.prompt||'';
+  return '🔧 '+b.name+(arg?': '+String(arg).split('\n')[0].slice(0,160):'')}
+function render(ev){
+  if(ev.type==='prompt'){add(el('div','msg me',ev.text));return}
+  if(ev.type==='log'){add(el('div','note',ev.text));return}
+  if(ev.type==='result'){const s=ev.duration_ms?Math.round(ev.duration_ms/1000)+'s':'';
+    add(el('div','note','✓ '+(ev.is_error?'Finished with an error':'Done')+(s?' in '+s:'')+(ev.total_cost_usd?' · $'+ev.total_cost_usd.toFixed(2):'')));return}
+  const m=ev.message;if(!m||!Array.isArray(m.content))return;
+  for(const b of m.content){
+    if(ev.type==='assistant'&&b.type==='text'&&b.text.trim())add(el('div','msg ai',b.text.trim()));
+    else if(b.type==='tool_use'){toolEls[b.id]=tool(toolLabel(b),JSON.stringify(b.input,null,2))}
+    else if(b.type==='tool_result'){const d=toolEls[b.tool_use_id];const out=typeof b.content==='string'?b.content:JSON.stringify(b.content);
+      if(d){const p=el('pre',null,'→ '+(out||'(no output)'));d.appendChild(p);if(b.is_error)d.querySelector('summary').classList.add('err')}}
+  }
+}
+function busy(on){$('send').disabled=on;$('stop').hidden=!on;$('sess').textContent=session?'Continuing conversation '+session.slice(0,8):'New conversation'}
+async function poll(){
+  try{const r=await api('events?job='+job+'&after='+after);fails=0;
+    r.events.forEach(render);after=r.next;if(r.session_id)session=r.session_id;
+    $('state').textContent=r.done?'':'Claude is working...';
+    if(r.done){busy(false);job=null;loadHist();return}
+  }catch(e){fails++;$('state').textContent='Reconnecting (the dashboard may be restarting)...'}
+  timer=setTimeout(poll,fails?3000:1200);
+}
+function follow(id,reset){clearTimeout(timer);job=id;if(reset){log.innerHTML='';after=0}busy(true);poll()}
+$('send').onclick=async()=>{const p=$('prompt').value.trim();if(!p)return;$('send').disabled=true;
+  try{const r=await api('run',{prompt:p,resume:session});$('prompt').value='';follow(r.job,false)}
+  catch(e){$('state').textContent=e.message;$('send').disabled=false}};
+$('stop').onclick=()=>job&&api('stop',{job}).catch(e=>$('state').textContent=e.message);
+$('new').onclick=()=>{if(job)return;session=null;log.innerHTML='';busy(false);$('state').textContent=''};
+$('prompt').onkeydown=e=>{if(e.key==='Enter'&&(e.ctrlKey||e.metaKey))$('send').click()};
+async function view(id){if(job)return;log.innerHTML='';after=0;
+  const r=await api('events?job='+id+'&after=0');r.events.forEach(render);session=r.session_id;busy(false);
+  $('state').textContent='Send a message to continue this conversation, or start a new one.'}
+async function loadHist(){try{const s=await api('status');const h=$('hist');h.innerHTML='';
+    if(!s.history.length)h.textContent='None yet.';
+    s.history.forEach(x=>{const b=el('button',null,new Date(x.started*1000).toLocaleString([], {dateStyle:'short',timeStyle:'short'})+' · '+x.prompt);
+      b.title=(x.actor||'')+'\n'+x.prompt;b.onclick=()=>view(x.id);h.appendChild(b)});
+    if(s.running&&!job)follow(s.running,true);
+  }catch(e){$('hist').textContent=e.message}}
+busy(false);loadHist();
+</script>
+{% endblock %}

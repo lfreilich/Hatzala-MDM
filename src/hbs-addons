@@ -1,0 +1,67 @@
+#!/usr/bin/env bash
+# hbs-addons: day-to-day commands for the HBS add-on stack
+set -euo pipefail
+PREFIX=/opt/hbs-addons; STACK=$PREFIX/stack
+compose() { docker compose --project-directory "$STACK" -f "$STACK/docker-compose.yml" --profile edge "$@"; }
+[ "$(id -u)" = 0 ] || { echo "Run with sudo"; exit 1; }
+set -a; [ -f "$STACK/.env" ] && . "$STACK/.env"; set +a
+
+case "${1:-help}" in
+  status)
+    compose ps
+    echo; echo "Bridge: $(curl -s --max-time 5 http://127.0.0.1:8090/healthz || echo 'not answering')" ;;
+  logs)      shift; compose logs --tail=200 -f "$@" ;;
+  restart)   shift; compose restart "$@" ;;
+  sync)      curl -s -X POST -o /dev/null http://127.0.0.1:8090/sync && echo "Sync started (watch: hbs-addons logs bridge)" ;;
+  creds)     cat "$PREFIX/CREDENTIALS.txt" ;;
+  2fa-code)
+    f="$STACK/authelia/notification.txt"
+    [ -f "$f" ] && tail -n 25 "$f" || echo "No codes yet. Start the authenticator registration at https://auth.$DOMAIN first." ;;
+  add-admin)
+    user="${2:?usage: hbs-addons add-admin <username> <email>}"; email="${3:?email required}"
+    pw=$(python3 -c "import secrets,string; print(''.join(secrets.choice(string.ascii_letters+string.digits) for _ in range(20)))")
+    hash=$(docker run --rm authelia/authelia:4.38 authelia crypto hash generate argon2 --password "$pw" | sed -n 's/^Digest: //p')
+    printf '  %s:\n    disabled: false\n    displayname: "%s"\n    password: "%s"\n    email: "%s"\n    groups: [admins]\n' \
+      "$user" "$user" "$hash" "$email" >> "$STACK/authelia/users_database.yml"
+    echo "Added $user. Password: $pw  (Authelia reloads users automatically)" ;;
+  dot)  # (re)apply AdGuard DNS-over-TLS certificate from Caddy and restart AdGuard
+    crt=$(ls "$STACK"/data/caddy/caddy/certificates/*/"dns.$DOMAIN/dns.$DOMAIN.crt" 2>/dev/null | head -1 || true)
+    [ -n "$crt" ] || { echo "No certificate for dns.$DOMAIN yet. Check the DNS record and: hbs-addons logs caddy"; exit 1; }
+    d="/caddy-data/${crt#"$STACK"/data/caddy/}"; d="${d%/*}"
+    code=$(curl -s -o /tmp/hbs-dot.out -w '%{http_code}' -u "admin:$(cat "$STACK/secrets/adguard_password")" -H 'Content-Type: application/json' \
+      -d "{\"enabled\":true,\"server_name\":\"dns.$DOMAIN\",\"force_https\":false,\"port_https\":0,\"port_dns_over_tls\":853,\"port_dns_over_quic\":0,\"allow_unencrypted_doh\":true,\"certificate_path\":\"$d/dns.$DOMAIN.crt\",\"private_key_path\":\"$d/dns.$DOMAIN.key\"}" \
+      http://127.0.0.1:8085/control/tls/configure)
+    [ "$code" = 200 ] || { echo "AdGuard rejected the TLS settings (HTTP $code): $(cat /tmp/hbs-dot.out)"; exit 1; }
+    compose restart adguard >/dev/null && echo "DoT certificate applied ($d)" ;;
+  backup)
+    ts=$(date +%Y%m%d-%H%M%S); out="$PREFIX/backups/hbs-$ts.tar.gz"
+    compose exec -T nc-db pg_dump -U nextcloud nextcloud > "$STACK/data/nc-db-dump.sql" 2>/dev/null || true
+    tar -czf "$out" -C "$STACK" .env secrets authelia data/traccar/data data/rustdesk data/adguard/conf data/bridge data/nc-db-dump.sql 2>/dev/null || true
+    chmod 600 "$out"; ls -1t "$PREFIX"/backups/hbs-*.tar.gz | tail -n +15 | xargs -r rm -f
+    echo "Backup: $out  (Nextcloud files themselves: $STACK/data/nextcloud)" ;;
+  rollback-edge)
+    echo "Stopping Caddy and restoring Headwind's original port 80/443 redirects..."
+    compose stop caddy || true
+    bash "$PREFIX/backups/edge-rollback.sh"
+    echo "Done. Headwind is served by Tomcat directly again; subdomains and 2FA are offline until: hbs-addons edge-on" ;;
+  edge-on)   bash "$PREFIX/src/install.sh" --yes ;;
+  update)    compose pull -q && compose build -q bridge && compose up -d && echo "Updated." ;;
+  reinstall) bash "$PREFIX/src/install.sh" "${@:2}" ;;
+  *)
+    cat <<EOF
+hbs-addons <command>
+  status            containers + bridge health
+  logs [service]    follow logs (caddy authelia traccar hbbs hbbr nextcloud adguard bridge ...)
+  restart [service] restart one or all services
+  sync              run a Headwind -> add-ons sync now
+  creds             show generated credentials
+  2fa-code          show Authelia one-time codes (for registering an authenticator app)
+  add-admin U EMAIL add another 2FA admin user
+  dot               re-apply the DNS-over-TLS certificate (runs weekly)
+  backup            snapshot configs + databases (runs nightly, keeps 14)
+  update            pull new images and restart
+  rollback-edge     give ports 80/443 back to Tomcat (undo the edge switch)
+  reinstall         re-run the installer (keeps data and secrets)
+EOF
+    ;;
+esac

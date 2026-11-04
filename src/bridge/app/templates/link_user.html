@@ -1,0 +1,28 @@
+{% extends "base.html" %}
+{% block body %}
+<div class="card">
+  <h2>Link a WalkieFleet user</h2>
+  <p class="mute">Enter an email and press Set up. This matches the WalkieFleet account to the SIP extension with the same number, creating it if needed, then shows a QR code to enroll their phone.
+    An existing extension keeps its password. If WalkieFleet needs changing, its full settings are saved, so do that at a quiet time.</p>
+  {% if ok %}<p style="color:var(--ok)">{{ ok }}</p>{% endif %}
+  {% if error %}<p class="err">{{ error }}</p>{% endif %}
+  <label class="mute" style="display:block;font-size:12px;margin-bottom:4px" for="cfg">Phone configuration</label>
+  <select id="cfg" style="max-width:320px;margin-bottom:10px;display:block">{% for c in configs %}<option value="{{ c.id }}">{{ c.name }}</option>{% endfor %}</select>
+  <input id="filter" placeholder="Filter by name or number" style="max-width:320px;margin-bottom:10px" oninput="var q=this.value.toLowerCase();document.querySelectorAll('tr[data-q]').forEach(function(r){r.hidden=r.dataset.q.indexOf(q)<0})">
+  <table>
+    <tr><th>WalkieFleet user</th><th>SIP link</th><th>Extension</th><th>Email and setup</th></tr>
+    {% for u in rows %}
+    <tr data-q="{{ (u.login ~ ' ' ~ (u.name or ''))|lower }}">
+      <td><b>{{ u.login }}</b><br><span class="mute">{{ u.name or '' }}</span></td>
+      <td>{% if u.sip %}<span class="mute">{{ u.sip }}</span>{% else %}<span class="pill">none</span>{% endif %}</td>
+      <td>{% if not u.matchable %}<span class="pill">no number</span>{% elif u.has_ext %}<span class="pill ok">exists</span>{% else %}<span class="pill">will be created</span>{% endif %}</td>
+      <td>{% if u.matchable %}<form class="inline" method="post" action="/link-user" onsubmit="if(this.dataset.sent)return false;this.dataset.sent=1;this.elements.config_id.value=document.getElementById('cfg').value;var b=this.querySelector('button');b.disabled=true;b.textContent='Setting up...'">
+        <input type="hidden" name="config_id">
+        <input type="hidden" name="login" value="{{ u.login }}">
+        <input type="email" name="email" value="{{ u.email }}" placeholder="name@example.com" required style="width:210px">
+        <button class="primary">Set up</button></form>{% else %}<span class="mute">Not available</span>{% endif %}</td>
+    </tr>
+    {% else %}<tr><td colspan="4" class="mute">No users loaded.</td></tr>{% endfor %}
+  </table>
+</div>
+{% endblock %}

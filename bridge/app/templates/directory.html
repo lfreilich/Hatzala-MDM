@@ -1,0 +1,40 @@
+{% extends "base.html" %}
+{% block body %}
+<div class="card">
+  <h2>Shared directory</h2>
+  <p class="mute">These contacts, plus every FreePBX extension, are published to the read-only
+    <b>{{ cfg.NC_DIRECTORY_NAME }}</b> address book. Every device syncs it into its phone contacts (DAVx⁵), so
+    Linphone and the dialer can show names.</p>
+  <form method="post" action="/directory/add" class="grid">
+    <input name="name" placeholder="Name *" required>
+    <input name="org" placeholder="Organisation / team">
+    <input name="title" placeholder="Role">
+    <input name="phone" placeholder="Phone">
+    <input name="mobile" placeholder="Mobile">
+    <input name="sip" placeholder="SIP (e.g. 201@pbx)">
+    <input name="email" placeholder="Email">
+    <input name="note" placeholder="Note">
+    <button class="primary">Add contact</button>
+  </form>
+</div>
+<div class="card">
+  <h2>Import / export
+    <a class="btn" style="float:right" href="/directory/export.csv">Export CSV</a></h2>
+  <form method="post" action="/directory/import" enctype="multipart/form-data">
+    <input type="file" name="file" accept=".csv" required>
+    <label><input type="checkbox" name="replace" value="1"> replace existing</label>
+    <button>Import CSV</button>
+    <span class="mute">Columns: name, org, title, phone, mobile, sip, email, note</span>
+  </form>
+</div>
+<div class="card">
+  <table>
+    <tr><th>Name</th><th>Org</th><th>Phone</th><th>Mobile</th><th>SIP</th><th>Email</th><th></th></tr>
+    {% for c in contacts %}
+    <tr><td><b>{{ c.name }}</b><br><span class="mute">{{ c.title or '' }}</span></td><td>{{ c.org or '' }}</td>
+      <td>{{ c.phone or '' }}</td><td>{{ c.mobile or '' }}</td><td>{{ c.sip or '' }}</td><td>{{ c.email or '' }}</td>
+      <td><form class="inline" method="post" action="/directory/{{ c.id }}/delete" onsubmit="return confirm('Delete {{ c.name }}?')"><button>Delete</button></form></td></tr>
+    {% else %}<tr><td colspan="7" class="mute">No manual contacts yet.</td></tr>{% endfor %}
+  </table>
+</div>
+{% endblock %}

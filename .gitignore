@@ -1,0 +1,16 @@
+# Secrets and per-server settings: never commit
+CREDENTIALS.txt
+.env
+*.env
+.env.*
+stack/secrets/
+stack/authelia/db.sqlite3
+stack/authelia/notification.txt
+stack/authelia/users_database.yml
+stack/authelia/configuration.yml
+# Live data and backups
+stack/data/
+backups/
+__pycache__/
+*.pyc
+*.sqlite3

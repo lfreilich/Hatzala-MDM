@@ -1,0 +1,79 @@
+{% extends "base.html" %}
+{% block body %}
+<style>
+.adddev{display:grid;grid-template-columns:minmax(260px,360px) minmax(280px,1fr);gap:16px;align-items:start}
+@media (max-width:760px){.adddev{grid-template-columns:1fr}}
+.adddev label{display:block;font-size:12px;color:var(--mute);margin:12px 0 4px}
+.adddev input,.adddev select{width:100%;padding:7px 8px}
+.adddev button{margin-top:16px;padding:8px 14px;font-size:13px}
+.qr{background:#fff;padding:12px;border-radius:8px;display:inline-block;border:1px solid var(--line)}
+.qr img{display:block;width:280px;max-width:100%;height:auto}
+.warn{color:var(--warn)}
+</style>
+<div class="adddev">
+  <div class="card">
+    <h2>Add device</h2>
+    {% if error %}<p class="err">{{ error }}</p>{% endif %}
+    {% if ok %}<p style="color:var(--ok)">{{ ok }}</p>{% endif %}
+    <form method="post" action="/add-device">
+      <label for="number">Device number</label>
+      <input id="number" name="number" value="{{ suggested }}" maxlength="32" pattern="[A-Za-z0-9_.\-]+" required>
+      <label for="user_name">User</label>
+      <input id="user_name" name="user_name" maxlength="100" placeholder="Full name" required>
+      <label for="user_email">Email (optional)</label>
+      <input id="user_email" name="user_email" type="email" maxlength="254" placeholder="name@example.com">
+      {% if cfg.PBX_ENABLED %}<label for="ext">Unit / extension (optional)</label>
+      <input id="ext" name="ext" maxlength="6" inputmode="numeric" pattern="[0-9]+" placeholder="e.g. 083">
+      <p class="mute" style="font-size:12px;margin:4px 0 0">An existing extension keeps its password. A new number is created in FreePBX. It's also the phone's WalkieFleet login.</p>{% endif %}
+      <label for="description">Description (optional)</label>
+      <input id="description" name="description" maxlength="100" placeholder="Who or what this phone is for">
+      <label for="config">Configuration</label>
+      <select id="config" name="config_id" required>
+        {% for c in configs %}<option value="{{ c.id }}" {{ 'selected' if c.id == selected else '' }}>{{ c.name }}</option>{% endfor %}
+      </select>
+      <label for="wifi_id">Wi-Fi for setup</label>
+      <select id="wifi_id" name="wifi_id">
+        <option value="0">None: connect the phone yourself</option>
+        {% for n in networks %}<option value="{{ n.id }}" {{ 'selected' if n.id == wifi else '' }}>{{ n.ssid }}</option>{% endfor %}
+      </select>
+      <p class="mute" style="font-size:12px;margin:4px 0 0">{% if networks %}The phone joins this network at the welcome screen and enrolls over it.{% else %}No networks saved yet. <a href="/wifi">Add one on Setup Wi-Fi</a>.{% endif %}</p>
+      <button class="primary">Create QR code</button>
+    </form>
+  </div>
+
+  <div class="card">
+    {% if number and key %}
+    <h2>Scan this on {{ number }}</h2>
+    {% if existed %}<p class="mute">This device already exists, so this is its current QR code.</p>{% endif %}
+    <div class="qr"><img alt="Enrollment QR code for {{ number }}"
+      src="{% if ip %}/add-device/ip-qr.svg?number={{ number|urlencode }}&wifi={{ wifi }}{% elif legacy %}/add-device/legacy-qr.svg?number={{ number|urlencode }}&wifi={{ wifi }}{% elif wifi %}/add-device/qr.svg?number={{ number|urlencode }}&wifi={{ wifi }}{% else %}https://{{ cfg.DOMAIN }}/rest/public/qr/{{ key }}?deviceId={{ number|urlencode }}{% endif %}"></div>
+    {% if ip %}<p class="warn"><b>By-address code.</b> Uses the server's IP address over plain HTTP, for networks that block or hide our server's name. <a href="/add-device?number={{ number|urlencode }}&existed={{ existed }}&wifi={{ wifi }}">Back to the normal code</a></p>
+    {% elif legacy %}<p class="warn"><b>Old Android code.</b> This setup uses unencrypted HTTP, so only use it for devices that can't use the normal code. <a href="/add-device?number={{ number|urlencode }}&existed={{ existed }}&wifi={{ wifi }}">Back to the normal code</a></p>
+    {% else %}<p class="mute">Radio or old Android showing "couldn't download the admin app"? <a href="/add-device?number={{ number|urlencode }}&existed={{ existed }}&legacy=1&wifi={{ wifi }}">Use the old Android code</a></p>
+    <p class="mute">Stuck on "Getting ready for work setup"? The network may be hiding our server. <a href="/add-device?number={{ number|urlencode }}&existed={{ existed }}&ip=1&wifi={{ wifi }}">Use the by-address code</a></p>{% endif %}
+    <form method="get" action="/add-device" style="margin:8px 0">
+      <input type="hidden" name="number" value="{{ number }}"><input type="hidden" name="existed" value="{{ existed }}"><input type="hidden" name="legacy" value="{{ legacy }}"><input type="hidden" name="ip" value="{{ ip }}">
+      <label for="wifi_switch" class="mute" style="font-size:12px">Setup Wi-Fi in this code</label>
+      <select id="wifi_switch" name="wifi" onchange="this.form.submit()" style="padding:6px 8px">
+        <option value="0">None{% if config_wifi %}: configuration's own ({{ config_wifi }}){% endif %}</option>
+        {% for n in networks %}<option value="{{ n.id }}" {{ 'selected' if n.id == wifi else '' }}>{{ n.ssid }}</option>{% endfor %}
+      </select>
+      <noscript><button>Change</button></noscript>
+    </form>
+    {% if wifi_name %}<p class="mute">The phone will join <b>{{ wifi_name }}</b> at the welcome screen. This code contains that network's password, so don't share it.</p>{% endif %}
+    <p class="mute">Configuration: {{ config_name }}</p>
+    <p class="warn"><b>The phone must be factory reset first.</b> Enrolling this way only works from the welcome screen, and a reset erases everything on the phone.</p>
+    <ol>
+      <li>Factory reset the phone and wait for the first welcome screen.</li>
+      <li>Tap the same spot on the welcome screen <b>6 times</b>. A QR scanner opens.</li>
+      <li>{% if wifi_name %}The phone joins {{ wifi_name }} by itself after the scan.{% else %}Connect to Wi-Fi if the phone asks.{% endif %}</li>
+      <li>Scan this code and accept the prompts.</li>
+    </ol>
+    <p class="mute">The phone then installs the Headwind agent and its apps. It shows up on the Device ops page after its first check-in.</p>
+    {% else %}
+    <h2>QR code</h2>
+    <p class="mute">Create a device to see its enrollment QR code here.</p>
+    {% endif %}
+  </div>
+</div>
+{% endblock %}

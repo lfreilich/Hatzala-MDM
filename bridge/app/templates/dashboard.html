@@ -1,0 +1,65 @@
+{% extends "base.html" %}
+{% block body %}
+<div class="card">
+  <h2>Devices <span class="mute">({{ devices|length }})</span>
+    <form class="inline" method="post" action="/sync" style="float:right">
+      <button>Sync now</button>
+      <button name="force_apps" value="1" title="Re-check app versions and Headwind app assignments">Sync + refresh apps</button>
+    </form>
+  </h2>
+  <table>
+    <tr><th>Device</th><th>SIP extension</th><th>Accounts</th><th>Provisioned</th><th>Actions</th></tr>
+    {% for d in devices %}
+    <tr>
+      <td><b>{{ d.number }}</b>{% if d.user_name %} · {{ d.user_name }}{% endif %}{% if d.user_email %} <span class="mute">{{ d.user_email }}</span>{% endif %}<br><span class="mute">{{ d.description or '' }}</span>
+        {% if d.last_error %}<div class="err" style="font-size:12px;max-width:320px">{{ d.last_error }}</div>{% endif %}</td>
+      <td>
+        <form method="post" action="/device/{{ d.number }}/sip">
+          <input name="ext" value="{{ d.ext or '' }}" size="6" placeholder="ext">
+          {% if not cfg.PBX_MANAGE_SECRETS or not cfg.PBX_ENABLED %}<input name="secret" type="password" size="10" placeholder="SIP secret">{% endif %}
+          <button>Save</button>
+        </form>
+        {% if d.ext %}<span class="pill {{ 'ok' if d.prov_token else '' }}">{{ 'ready' if d.prov_token else 'waiting for secret' }}</span>{% endif %}
+      </td>
+      <td style="font-size:12px">
+        {% if d.traccar_id %}<span class="pill ok">Traccar #{{ d.traccar_id }}</span>{% endif %}
+        {% if d.nc_user %}<span class="pill ok">Nextcloud {{ d.nc_user }}</span>{% endif %}
+      </td>
+      <td>{% for k, v in d.steps.items() %}<span class="pill ok" title="{{ v }}">{{ k }}</span>{% else %}<span class="mute">waiting for apps to install</span>{% endfor %}</td>
+      <td style="white-space:nowrap">
+        {% for a, label in [('track','Start tracking'),('nclogin','Nextcloud login'),('contacts','Contacts login'),('rustdesk','Open RustDesk'),('perms','Grant perms'),('config','Refresh config'),('reboot','Reboot'),('reset','Re-provision')] %}
+        <form class="inline" method="post" action="/device/{{ d.number }}/action/{{ a }}"
+          {% if a in ('reboot','reset') %}onsubmit="return confirm('{{ label }} {{ d.number }}?')"{% endif %}><button>{{ label }}</button></form>
+        {% if loop.index == 4 %}<br>{% endif %}
+        {% endfor %}
+        <form class="inline" method="post" action="/device/{{ d.number|urlencode }}/delete" data-number="{{ d.number }}"
+          onsubmit="var v=prompt('Permanently delete '+this.dataset.number+'?\n\nThis removes it from Headwind and deletes its Traccar location history and its Nextcloud account and files. It cannot be undone.\n\nThe phone is NOT wiped or unenrolled.\n\nType the device number to confirm:');this.elements.typed.value=v||'';return v===this.dataset.number">
+          <input type="hidden" name="typed"><button style="color:var(--err)">Delete</button></form>
+      </td>
+    </tr>
+    {% else %}
+    <tr><td colspan="5" class="mute">No devices yet — the first sync runs a few seconds after start-up.</td></tr>
+    {% endfor %}
+  </table>
+</div>
+
+<div class="card">
+  <h2>Over-the-air apps</h2>
+  <div class="grid">
+  {% for a, st in apks.items() %}
+    <div><b>{{ cfg.APP_LABEL[a] }}</b> <span class="mute">{{ cfg.PKG[a] }}</span><br>
+      {% if st %}<span class="pill ok">{{ st.version }}</span> <a class="mute" href="/apk/{{ st.file }}">apk</a>{% else %}<span class="pill">not mirrored yet</span>{% endif %}</div>
+  {% endfor %}
+  </div>
+</div>
+
+<div class="card">
+  <h2>Activity</h2>
+  <table>
+    {% for e in events %}
+    <tr><td class="mute" style="white-space:nowrap"><span data-ts="{{ e.ts }}"></span></td>
+      <td>{{ e.device or '' }}</td><td class="{{ 'err' if e.level=='error' else '' }}">{{ e.message }}</td></tr>
+    {% endfor %}
+  </table>
+</div>
+{% endblock %}

@@ -1,0 +1,167 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>HBS Control Panel</title>
+<link rel="icon" type="image/png" href="/static/logo.png">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Heebo:wght@400;500;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+/* Hatzala Beit Shemesh brand tokens, from hatzbs.org */
+:root{color-scheme:dark;--side:hsl(232 80% 8%);--side-ink:#fff;--side-mute:hsl(220 20% 75%);--side-hover:hsl(232 70% 20%);--content:hsl(232 78% 13%);--card:hsl(232 70% 18%);--ink:#fff;--mute:hsl(220 20% 75%);--line:hsl(232 50% 28%);--acc:hsl(43 100% 50%);--acc-ink:hsl(232 78% 13%)}
+*{box-sizing:border-box}
+html,body{height:100%;margin:0}
+body{display:flex;background:var(--content);color:var(--ink);font:400 14px/20px Inter,Heebo,system-ui,-apple-system,Segoe UI,Roboto,sans-serif;overflow:hidden}
+aside{width:232px;flex:none;background:var(--side);color:var(--side-ink);display:flex;flex-direction:column}
+.brand{padding:16px 20px;font-size:15px;font-weight:600;line-height:18px;display:flex;align-items:center;gap:12px}
+.brand img{height:52px;width:auto;flex:none}
+.brand small{display:block;font-size:12px;font-weight:400;color:var(--side-mute)}
+nav{flex:1;overflow-y:auto;padding:4px 0}
+.group{padding:14px 20px 6px;font-size:11px;letter-spacing:.6px;text-transform:uppercase;color:var(--side-mute)}
+nav button{all:unset;box-sizing:border-box;display:flex;align-items:center;gap:12px;width:100%;padding:10px 20px;cursor:pointer;color:var(--side-ink)}
+nav button svg{width:20px;height:20px;flex:none;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+nav button:hover{background:var(--side-hover)}
+nav button:focus-visible{outline:2px solid var(--acc);outline-offset:-2px}
+nav button[aria-current=true]{background:var(--acc);color:var(--acc-ink);font-weight:600}
+.who{padding:12px 20px;font-size:12px;color:var(--side-mute);border-top:1px solid var(--line);word-break:break-all}
+main{flex:1;min-width:0;display:flex;flex-direction:column}
+.bar{height:48px;flex:none;display:flex;align-items:center;gap:12px;padding:0 16px;background:var(--card);border-bottom:1px solid var(--line)}
+.bar h1{font-size:15px;font-weight:500;margin:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.views{margin-left:auto;display:flex;border:1px solid var(--line);border-radius:6px;overflow:hidden;flex:none}
+.views button{all:unset;padding:5px 11px;font-size:12px;cursor:pointer;color:var(--mute)}
+.views button+button{border-left:1px solid var(--line)}
+.views button:focus-visible{outline:2px solid var(--acc);outline-offset:-2px}
+.views button[aria-pressed=true]{background:var(--acc);color:var(--acc-ink);font-weight:600}
+.bar a{font-size:12px;color:var(--mute);white-space:nowrap}
+.panes{flex:1;min-height:0;display:flex;padding:8px}
+.pane{min-width:0;min-height:0;position:relative;background:var(--card);border:1px solid var(--line);border-radius:6px;overflow:hidden}
+#left{flex:0 0 var(--split,50%)}
+#right{flex:1}
+.pane iframe{position:absolute;inset:0;width:100%;height:100%;border:0;background:var(--card)}
+.pane iframe[hidden]{display:none}
+#drag{flex:0 0 8px;cursor:col-resize;position:relative;touch-action:none}
+#drag::after{content:"";position:absolute;top:calc(50% - 20px);left:3px;width:2px;height:40px;background:var(--line);border-radius:2px}
+#drag:hover::after,#drag:focus-visible::after{background:var(--acc)}
+#drag:focus-visible{outline:none}
+.dragging iframe{pointer-events:none}
+.dragging{cursor:col-resize;user-select:none}
+body[data-view=left] #right,body[data-view=left] #drag{display:none}
+body[data-view=right] #left,body[data-view=right] #drag{display:none}
+body[data-view=left] #left{flex:1}
+@media (max-width:900px){
+  body{flex-direction:column}
+  aside{width:auto;flex-direction:row;align-items:center}
+  .brand span,.group,.who-name{display:none}
+  .brand{padding:6px 10px}
+  .brand img{height:36px}
+  .who{border-top:0;padding:0 12px;white-space:nowrap;word-break:normal}
+  nav{display:flex;overflow-x:auto;padding:0}
+  nav button{width:auto;padding:12px;white-space:nowrap}
+  nav button svg{display:none}
+  .views{display:none}
+  /* One pane at a time on small screens */
+  #drag,#left{display:none!important}
+  #right{display:block!important}
+}
+</style>
+</head>
+<body data-view="split">
+<aside>
+  <div class="brand"><img src="/static/logo.png" alt="Hatzala Beit Shemesh"><span>Hatzala Beit Shemesh<small>Control panel</small></span></div>
+  <nav id="nav" aria-label="Modules"></nav>
+  <div class="who">{% if user %}<span class="who-name">{{ user }}<br></span>{% endif %}<a style="color:var(--acc)" href="https://{{ cfg.OPS_HOST }}/logout">Log out</a></div>
+</aside>
+<main>
+  <div class="bar">
+    <h1 id="title"></h1>
+    <a id="ext" target="_blank" rel="noopener">Open in new tab</a>
+    <div class="views" role="group" aria-label="Layout">
+      <button data-v="split" aria-pressed="true">Split</button>
+      <button data-v="left" aria-pressed="false">Headwind</button>
+      <button data-v="right" aria-pressed="false">Module</button>
+    </div>
+  </div>
+  <div class="panes" id="panes">
+    <section class="pane" id="left" aria-label="Headwind MDM"></section>
+    <div id="drag" role="separator" aria-orientation="vertical" aria-label="Resize panels" tabindex="0"></div>
+    <section class="pane" id="right" aria-label="Selected module"></section>
+  </div>
+</main>
+<script>
+const I={
+  phone:'<rect x="7" y="3" width="10" height="18" rx="2"/><path d="M11 18h2"/>',
+  pin:'<path d="M12 21s7-6.1 7-11a7 7 0 1 0-14 0c0 4.9 7 11 7 11z"/><circle cx="12" cy="10" r="2.5"/>',
+  cloud:'<path d="M7 18h10a4 4 0 0 0 .6-8A6 6 0 0 0 6 9.5 4.3 4.3 0 0 0 7 18z"/>',
+  shield:'<path d="M12 3l7 3v5c0 4.5-3 8-7 10-4-2-7-5.500-7-10V6z"/>',
+  remote:'<rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 16v4"/>',
+  book:'<path d="M5 4h12a2 2 0 0 1 2 2v14H7a2 2 0 0 1-2-2z"/><path d="M9 9h6M9 13h6"/>',
+  radio:'<rect x="6" y="8" width="12" height="13" rx="2"/><path d="M9 8V3M10 13h4M10 17h4"/>',
+  grid:'<rect x="4" y="4" width="7" height="7" rx="1"/><rect x="13" y="4" width="7" height="7" rx="1"/><rect x="4" y="13" width="7" height="7" rx="1"/><rect x="13" y="13" width="7" height="7" rx="1"/>',
+  users:'<circle cx="9" cy="8" r="3.5"/><path d="M2.5 20a6.5 6.5 0 0 1 13 0"/><path d="M16 4.6a3.5 3.5 0 0 1 0 6.8M18.5 14.2A6.5 6.5 0 0 1 21.5 20"/>',
+  wifi:'<path d="M2.5 9a14 14 0 0 1 19 0"/><path d="M5.5 12.5a9.5 9.5 0 0 1 13 0"/><path d="M8.7 16a5 5 0 0 1 6.6 0"/><circle cx="12" cy="19.3" r="1"/>'
+};
+/* ngsw-bypass: Headwind's service worker would otherwise answer this from cache, skipping sign-on */
+const HEADWIND='https://{{ cfg.DOMAIN }}/hbs-sso?ngsw-bypass=1';
+const MODULES=[
+  {id:'devices',label:'Device ops',icon:'grid',url:'/'},
+  {id:'add',label:'Add device',icon:'phone',url:'/add-device'},
+  {id:'wifi',label:'Setup Wi-Fi',icon:'wifi',url:'/wifi'},
+  {id:'link',label:'Link user',icon:'book',url:'/link-user'},
+  {id:'fleet',label:'WalkieFleet ↗',icon:'radio',url:'https://20.217.192.70:8443/',external:true},
+  {id:'map',label:'Location',icon:'pin',url:'https://{{ cfg.MAP_HOST }}/hbs-sso'},
+  {id:'files',label:'Files & contacts',icon:'cloud',url:'https://{{ cfg.NC_HOST }}/hbs-sso'},
+  {id:'dns',label:'DNS filter',icon:'shield',url:'https://{{ cfg.DNS_HOST }}/'},
+  {id:'remote',label:'Remote support',icon:'remote',url:'/rustdesk'},
+  {id:'directory',label:'Directory',icon:'book',url:'/directory'},
+  {id:'admins',label:'Admins',icon:'users',url:'/admins'}
+];
+const store={get(k){try{return localStorage.getItem(k)}catch(e){return null}},set(k,v){try{localStorage.setItem(k,v)}catch(e){}}};
+const $=id=>document.getElementById(id);
+const right=$('right'),frames={};
+const makeFrame=(url,title)=>{const f=document.createElement('iframe');f.src=url;f.title=title;return f};
+$('left').appendChild(makeFrame(HEADWIND,'Headwind MDM'));
+
+function select(m){
+  Object.values(frames).forEach(f=>f.hidden=true);
+  if(!frames[m.id]){frames[m.id]=makeFrame(m.url,m.label);right.appendChild(frames[m.id])}
+  frames[m.id].hidden=false;
+  document.querySelectorAll('#nav button').forEach(b=>b.setAttribute('aria-current',b.dataset.id===m.id));
+  $('title').textContent=m.label;
+  $('ext').href=new URL(m.url,location.href).href;
+  store.set('hbs-module',m.id);
+}
+const nav=$('nav');
+nav.insertAdjacentHTML('beforeend','<div class="group">Modules</div>');
+MODULES.forEach(m=>{
+  const b=document.createElement('button');b.dataset.id=m.id;
+  b.innerHTML='<svg viewBox="0 0 24 24" aria-hidden="true">'+I[m.icon]+'</svg><span></span>';
+  b.querySelector('span').textContent=m.label;
+  b.onclick=()=>{if(m.external){window.open(m.url,'_blank','noopener');return}select(m);if(document.body.dataset.view==='left')setView('split')};
+  nav.appendChild(b);
+});
+function setView(v){
+  document.body.dataset.view=v;
+  document.querySelectorAll('.views button').forEach(b=>b.setAttribute('aria-pressed',b.dataset.v===v));
+  store.set('hbs-view',v);
+}
+document.querySelectorAll('.views button').forEach(b=>b.onclick=()=>setView(b.dataset.v));
+
+const setSplit=p=>{p=Math.min(80,Math.max(20,p));$('left').style.setProperty('--split',p+'%');store.set('hbs-split',p)};
+const drag=$('drag'),panes=$('panes');
+drag.addEventListener('pointerdown',e=>{
+  drag.setPointerCapture(e.pointerId);document.body.classList.add('dragging');
+  const move=ev=>{const r=panes.getBoundingClientRect();setSplit((ev.clientX-r.left)/r.width*100)};
+  const up=()=>{document.body.classList.remove('dragging');drag.removeEventListener('pointermove',move);drag.removeEventListener('pointerup',up)};
+  drag.addEventListener('pointermove',move);drag.addEventListener('pointerup',up);
+});
+drag.addEventListener('keydown',e=>{
+  const cur=parseFloat(store.get('hbs-split'))||50;
+  if(e.key==='ArrowLeft')setSplit(cur-3);if(e.key==='ArrowRight')setSplit(cur+3);
+});
+setSplit(parseFloat(store.get('hbs-split'))||50);
+const v=store.get('hbs-view');if(['split','left','right'].includes(v))setView(v);
+select(MODULES.find(m=>m.id===store.get('hbs-module'))||MODULES[0]);
+</script>
+</body>
+</html>

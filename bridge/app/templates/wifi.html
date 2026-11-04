@@ -1,0 +1,73 @@
+{% extends "base.html" %}
+{% block body %}
+<style>
+.wifi{display:grid;grid-template-columns:minmax(260px,360px) minmax(280px,1fr);gap:16px;align-items:start}
+@media (max-width:760px){.wifi{grid-template-columns:1fr}}
+.wifi label{display:block;font-size:12px;color:var(--mute);margin:12px 0 4px}
+.wifi label.check{display:flex;gap:8px;align-items:center;color:var(--ink);font-size:13px}
+.wifi input:not([type=checkbox]),.wifi select{width:100%;padding:7px 8px;box-sizing:border-box}
+.wifi button.primary{margin-top:16px;padding:8px 14px;font-size:13px}
+.wifi table{width:100%;border-collapse:collapse}
+.wifi td,.wifi th{text-align:left;padding:8px 6px;border-bottom:1px solid var(--line);vertical-align:middle}
+.wifi td.act{white-space:nowrap;text-align:right}
+</style>
+<div class="wifi">
+  <div class="card">
+    <h2 id="form-title">Add a network</h2>
+    {% if error %}<p class="err">{{ error }}</p>{% endif %}
+    {% if ok %}<p style="color:var(--ok)">{{ ok }}</p>{% endif %}
+    <form method="post" action="/wifi" id="wifi-form">
+      <input type="hidden" name="wifi_id" id="wifi_id" value="0">
+      <label for="ssid">Network name (SSID)</label>
+      <input id="ssid" name="ssid" maxlength="32" required autocomplete="off">
+      <label for="security">Security</label>
+      <select id="security" name="security">
+        {% for k, v in security.items() %}<option value="{{ k }}">{{ v }}</option>{% endfor %}
+      </select>
+      <label for="password">Password</label>
+      <input id="password" name="password" type="password" maxlength="63" autocomplete="new-password">
+      <p class="mute" id="pw-hint" style="font-size:12px;margin:4px 0 0;display:none">Leave blank to keep the saved password.</p>
+      <label class="check"><input type="checkbox" name="hidden" id="hidden" value="1"> Hidden network</label>
+      <button class="primary" id="save">Save network</button>
+      <button type="button" id="cancel" style="display:none;margin-left:8px" onclick="location.href='/wifi'">Cancel</button>
+    </form>
+  </div>
+
+  <div class="card">
+    <h2>Saved networks</h2>
+    {% if networks %}
+    <table>
+      <tr><th>Network</th><th>Security</th><th></th></tr>
+      {% for n in networks %}
+      <tr>
+        <td>{{ n.ssid }}{% if n.hidden %} <span class="pill">hidden</span>{% endif %}</td>
+        <td class="mute">{{ security[n.security] }}</td>
+        <td class="act">
+          <button type="button" data-id="{{ n.id }}" data-ssid="{{ n.ssid }}" data-sec="{{ n.security }}" data-hidden="{{ n.hidden }}" onclick="editNet(this)">Edit</button>
+          <form class="inline" method="post" action="/wifi/{{ n.id }}/delete" data-ssid="{{ n.ssid }}" onsubmit="return confirm('Remove '+this.dataset.ssid+'? QR codes already made with it keep working.')"><button style="color:var(--err)">Remove</button></form>
+        </td>
+      </tr>
+      {% endfor %}
+    </table>
+    {% else %}<p class="mute">None yet. Networks you save here can be picked on Add device.</p>{% endif %}
+    <p class="mute" style="margin-top:16px">Android's QR setup carries one network, so each QR code uses the one you pick on Add device. The phone joins it at the welcome screen and enrolls over it. Add other networks on the phone afterwards.</p>
+    <p class="mute">Passwords are stored on this server and go into the QR codes made with them.</p>
+  </div>
+</div>
+<script>
+function syncPw(){var open=document.getElementById('security').value==='NONE';var p=document.getElementById('password');p.disabled=open;if(open)p.value='';}
+document.getElementById('security').addEventListener('change',syncPw);
+function editNet(b){
+  document.getElementById('form-title').textContent='Edit '+b.dataset.ssid;
+  document.getElementById('wifi_id').value=b.dataset.id;
+  document.getElementById('ssid').value=b.dataset.ssid;
+  document.getElementById('security').value=b.dataset.sec;
+  document.getElementById('hidden').checked=b.dataset.hidden==='1';
+  document.getElementById('password').value='';
+  document.getElementById('pw-hint').style.display='';
+  document.getElementById('cancel').style.display='';
+  syncPw();document.getElementById('ssid').focus();
+}
+syncPw();
+</script>
+{% endblock %}

@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Signed out · HBS</title>
+<link rel="icon" type="image/png" href="/static/logo.png">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Heebo:wght@400;500;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+:root{color-scheme:dark;--bg:hsl(232 78% 13%);--card:hsl(232 70% 18%);--ink:#fff;--mute:hsl(220 20% 75%);--line:hsl(232 50% 28%);--acc:hsl(43 100% 50%);--acc-ink:hsl(232 78% 13%)}
+body{margin:0;min-height:100vh;display:grid;place-items:center;padding:16px;box-sizing:border-box;background:var(--bg);color:var(--ink);font:14px/1.45 Inter,Heebo,system-ui,-apple-system,Segoe UI,Roboto,sans-serif}
+div{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:24px;max-width:340px;text-align:center}
+img{height:96px;width:auto;margin-bottom:12px}
+h1{font-size:18px;margin:0 0 8px}p{margin:0 0 16px;color:var(--mute)}
+a{display:inline-block;padding:7px 14px;border-radius:6px;background:var(--acc);color:var(--acc-ink);font-weight:600;text-decoration:none}
+</style>
+</head>
+<body><div>
+  <img src="/static/logo.png" alt="Hatzala Beit Shemesh">
+  <h1>You're signed out</h1>
+  <p>Your HBS session has ended. You may still be signed in to your Google account on this browser.</p>
+  <a href="https://{{ cfg.OPS_HOST }}/home">Sign in again</a>
+</div></body>
+</html>

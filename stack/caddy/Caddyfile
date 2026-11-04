@@ -1,0 +1,191 @@
+# Edge proxy for hbs-mdm. Env vars come from /opt/hbs-addons/stack/.env
+{
+	email {$ADMIN_EMAIL}
+}
+
+(gate) {
+	forward_auth 127.0.0.1:4180 {
+		uri /oauth2/auth
+		copy_headers X-Auth-Request-Email>Remote-Email
+		@denied status 401
+		handle_response @denied {
+			redir https://auth.{$DOMAIN}/oauth2/start?rd=https://{host}{uri}
+		}
+	}
+}
+
+(common) {
+	encode gzip
+	header {
+		-Server
+		Strict-Transport-Security "max-age=31536000"
+		X-Content-Type-Options nosniff
+	}
+}
+
+# ---------------------------------------------------------------------------
+# Headwind MDM itself (Tomcat on :8080).
+# Devices must keep working WITHOUT 2FA, so only browser/admin paths are gated.
+# Plain http is served too (no forced redirect) because older enrolments may sync over http.
+# ---------------------------------------------------------------------------
+http://{$DOMAIN}, https://{$DOMAIN} {
+	import common
+
+	# Single sign-on after the gate
+	handle /hbs-sso {
+		import gate
+		reverse_proxy 127.0.0.1:8090
+	}
+	handle /hbs-logout {
+		reverse_proxy 127.0.0.1:8090
+	}
+	# 1) Admin APIs used by the web panel -> 2FA
+	@adminapi path_regexp adminapi ^/rest/(private/|plugin/main/|plugins/[^/]+/(private/|[^/]*-plugin-settings)|public/(auth|jwt|passwordReset|signup))
+	handle @adminapi {
+		import gate
+		reverse_proxy 127.0.0.1:8080
+	}
+	# 2) Everything else under /rest and /files is device traffic (sync, enrolment QR,
+	#    APK downloads, push long-poll, device plugin uploads) -> no gate, as today
+	@device path_regexp device ^/(rest|files)/
+	handle @device {
+		reverse_proxy 127.0.0.1:8080 {
+			flush_interval -1
+			transport http {
+				read_timeout 10m
+			}
+		}
+	}
+	# 3) The web panel itself (HTML/JS/CSS) -> sign-in gate
+	handle {
+		import gate
+		header Content-Security-Policy "frame-ancestors 'self' https://ops.{$DOMAIN}"
+		reverse_proxy 127.0.0.1:8080
+	}
+}
+
+# By-address enrolment for networks whose DNS hides the domain: device traffic only, nothing for browsers
+http://{$PUBLIC_IP:72.62.58.146} {
+	import common
+	# Same split as the domain: admin APIs are never served here, other /rest and /files are device traffic
+	@ipadmin path_regexp ipadmin ^/rest/(private/|plugin/main/|plugins/[^/]+/(private/|[^/]*-plugin-settings)|public/(auth|jwt|passwordReset|signup))
+	handle @ipadmin {
+		respond 404
+	}
+	@device path_regexp ipdevice ^/(rest|files)/
+	handle @device {
+		reverse_proxy 127.0.0.1:8080 {
+			flush_interval -1
+			transport http {
+				read_timeout 10m
+			}
+		}
+	}
+	respond 404
+}
+
+auth.{$DOMAIN} {
+	import common
+	reverse_proxy 127.0.0.1:4180
+}
+
+# Bridge: dashboard behind 2FA; provisioning + APK mirror open (token-protected / public files)
+ops.{$DOMAIN} {
+	import common
+	handle /prov/* {
+		reverse_proxy 127.0.0.1:8090
+	}
+	handle /healthz {
+		reverse_proxy 127.0.0.1:8090
+	}
+	handle /signed-out {
+		reverse_proxy 127.0.0.1:8090
+	}
+	handle /logout {
+		reverse_proxy 127.0.0.1:8090
+	}
+	handle /static/* {
+		reverse_proxy 127.0.0.1:8090
+	}
+	handle_path /apk/* {
+		root * /srv/apk
+		file_server
+	}
+	handle {
+		import gate
+		reverse_proxy 127.0.0.1:8090
+	}
+}
+
+# Traccar web UI (2FA + Traccar's own login)
+map.{$DOMAIN} {
+	import common
+	handle /hbs-sso {
+		import gate
+		reverse_proxy 127.0.0.1:8090
+	}
+	handle /hbs-logout {
+		reverse_proxy 127.0.0.1:8090
+	}
+	handle {
+		import gate
+		header Content-Security-Policy "frame-ancestors 'self' https://ops.{$DOMAIN}"
+		reverse_proxy 127.0.0.1:8082
+	}
+}
+
+# Traccar Client position reports (OsmAnd protocol) - must be open for phones
+track.{$DOMAIN} {
+	reverse_proxy 127.0.0.1:5055
+}
+
+# Nextcloud - apps talk to it directly, so it uses its own login + TOTP instead of the gate
+cloud.{$DOMAIN} {
+	import common
+	request_body {
+		max_size 2GB
+	}
+	handle /hbs-sso {
+		import gate
+		reverse_proxy 127.0.0.1:8090
+	}
+	handle /hbs-logout {
+		reverse_proxy 127.0.0.1:8090
+	}
+	redir /.well-known/carddav /remote.php/dav 301
+	redir /.well-known/caldav /remote.php/dav 301
+	reverse_proxy 127.0.0.1:8083 {
+		# Allow the ops portal (only) to embed Nextcloud
+		header_down -X-Frame-Options
+		header_down Content-Security-Policy "frame-ancestors 'self'" "frame-ancestors 'self' https://ops.{$DOMAIN}"
+	}
+}
+
+# AdGuard Home: admin behind 2FA; DoH open. (DoT is served by AdGuard itself on :853)
+dns.{$DOMAIN} {
+	import common
+	handle /dns-query* {
+		reverse_proxy 127.0.0.1:8085
+	}
+	handle {
+		import gate
+		header Content-Security-Policy "frame-ancestors 'self' https://ops.{$DOMAIN}"
+		# Signed-in users skip AdGuard's own login
+		reverse_proxy 127.0.0.1:8085 {
+			header_up Authorization "Basic {$ADGUARD_BASIC}"
+		}
+	}
+}
+
+# Gives RustDesk's hostname a certificate-backed landing page (the ports themselves are direct)
+rd.{$DOMAIN} {
+	respond "HBS RustDesk relay" 200
+}
+
+# Old name: Bezeq's cyber protection blocks it, so send anything still using it to the new one
+hbs-mdm.cloud, ops.hbs-mdm.cloud, map.hbs-mdm.cloud, cloud.hbs-mdm.cloud, track.hbs-mdm.cloud, dns.hbs-mdm.cloud, auth.hbs-mdm.cloud, rd.hbs-mdm.cloud, http://hbs-mdm.cloud {
+	map {host} {newhost} {
+		~^(.*)hbs-mdm\.cloud$ "${1}hatzala-mdm.com"
+	}
+	redir https://{newhost}{uri} 308
+}

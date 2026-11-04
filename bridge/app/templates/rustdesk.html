@@ -1,0 +1,18 @@
+{% extends "base.html" %}
+{% block body %}
+<div class="card" style="max-width:720px">
+  <h2>Remote support (RustDesk)</h2>
+  {% if not key %}<p class="err">The RustDesk server key isn't available yet. Check that the hbbs container is running.</p>{% endif %}
+  <p>Android doesn't let an MDM set RustDesk's server silently. Do this <b>once per device</b>:</p>
+  <ol>
+    <li>On the device open <b>Remote Support</b> (or press <i>Open RustDesk</i> on the Devices page).</li>
+    <li>Go to <b>Settings → ID/Relay server</b> and tap the <b>QR scan</b> icon.</li>
+    <li>Scan this code, then tap <b>OK</b>.</li>
+    <li>On the <b>Share screen</b> tab, start the service and allow screen capture + accessibility.</li>
+  </ol>
+  <div style="background:#fff;padding:12px;display:inline-block;border-radius:8px;width:300px">{{ qr_svg|safe }}</div>
+  <p>Manual entry: ID server <code>{{ host }}</code>, relay <code>{{ host }}:21117</code>, key <code>{{ key }}</code></p>
+  <p class="mute">To control a device from a PC, install RustDesk on the PC with the same three values. Then enter the
+    device's RustDesk ID. Someone at the phone may need to accept the screen-sharing prompt. Android requires this.</p>
+</div>
+{% endblock %}

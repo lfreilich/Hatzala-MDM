@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>HBS Device Ops</title>
+<link rel="icon" type="image/png" href="/static/logo.png">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Heebo:wght@400;500;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+/* Hatzala Beit Shemesh brand tokens, from hatzbs.org (dark navy + gold, on every colour scheme) */
+:root{color-scheme:dark;--bg:hsl(232 78% 13%);--card:hsl(232 70% 18%);--ink:#fff;--mute:hsl(220 20% 75%);--line:hsl(232 50% 28%);--acc:hsl(43 100% 50%);--acc-ink:hsl(232 78% 13%);--ok:#3ccb8f;--warn:hsl(45 100% 58%);--err:#ff8a8a}
+*{box-sizing:border-box}body{margin:0;font:14px/1.45 Inter,Heebo,system-ui,-apple-system,Segoe UI,Roboto,sans-serif;background:var(--bg);color:var(--ink)}
+header{display:flex;gap:16px;align-items:center;padding:10px 20px;background:hsl(232 80% 8%);border-bottom:1px solid var(--line);flex-wrap:wrap}
+header img{height:40px;width:auto;display:block}
+header b{color:var(--acc);font-size:16px}nav a{margin-right:14px;color:var(--ink);text-decoration:none}nav a:hover{color:var(--acc)}
+header .meta{margin-left:auto;color:var(--mute);font-size:12px}
+main{padding:20px;max-width:1300px;margin:auto}
+.card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:16px;margin-bottom:16px;overflow-x:auto}
+h2{font-size:15px;margin:0 0 12px}table{border-collapse:collapse;width:100%}th,td{text-align:left;padding:7px 8px;border-bottom:1px solid var(--line);vertical-align:top}
+th{font-size:12px;color:var(--mute);font-weight:600}
+.pill{display:inline-block;padding:1px 7px;border-radius:9px;font-size:11px;border:1px solid var(--line);margin:1px;color:var(--mute)}
+.pill.ok{color:var(--ok);border-color:currentColor}.err{color:var(--err)}.mute{color:var(--mute)}
+button,.btn{font:inherit;font-size:12px;padding:4px 9px;border-radius:6px;border:1px solid var(--line);background:var(--card);color:var(--ink);cursor:pointer;text-decoration:none;display:inline-block}
+button:hover,.btn:hover{border-color:var(--acc);color:var(--acc)}button.primary{background:var(--acc);color:var(--acc-ink);border-color:var(--acc);font-weight:600}button.primary:hover{background:hsl(45 100% 58%);color:var(--acc-ink)}
+a{color:var(--acc)}:focus-visible{outline:2px solid var(--acc);outline-offset:1px}
+form.inline{display:inline}input,select{font:inherit;padding:4px 6px;border:1px solid var(--line);border-radius:6px;background:var(--bg);color:var(--ink)}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:8px}
+code{font-size:12px;background:var(--bg);padding:1px 4px;border-radius:4px;word-break:break-all}
+</style>
+</head>
+<body>
+<header>
+  <img src="/static/logo.png" alt="Hatzala Beit Shemesh"><b>HBS Device Ops</b>
+  <nav>
+    <a href="/">Devices</a><a href="/wifi">Setup Wi-Fi</a><a href="/link-user">Link user</a><a href="/directory">Directory</a><a href="/rustdesk">Remote support</a><a href="/admins">Admins</a>
+    <a href="https://{{ cfg.MAP_HOST }}/hbs-sso" target="_blank">Map ↗</a>
+    <a href="https://{{ cfg.DOMAIN }}/hbs-sso?ngsw-bypass=1" target="_blank">Headwind ↗</a>
+    <a href="https://{{ cfg.NC_HOST }}/hbs-sso" target="_blank">Nextcloud ↗</a>
+    <a href="https://{{ cfg.DNS_HOST }}" target="_blank">DNS filter ↗</a>
+  </nav>
+  <span class="meta">{% if user %}{{ user }} · {% endif %}last sync:
+    {% if last_sync %}<span data-ts="{{ last_sync }}"></span>{% else %}never{% endif %}
+    {% if sync_error %}<span class="err" title="{{ sync_error }}">· sync error</span>{% endif %}
+    · <a class="btn" href="https://{{ cfg.OPS_HOST }}/logout">Log out</a></span>
+</header>
+<main>{% block body %}{% endblock %}</main>
+<script>
+/* hbs-embed: top-level visits go to the portal; inside the portal the shell provides the navigation */
+if(window===top&&location.pathname==='/')location.replace('/home');
+if(window!==top)document.querySelector('header').style.display='none';
+document.querySelectorAll('[data-ts]').forEach(e=>{const s=(Date.now()/1000-+e.dataset.ts)|0;e.textContent=s<90?s+'s ago':s<5400?((s/60)|0)+' min ago':new Date(+e.dataset.ts*1000).toLocaleString()});
+</script>
+</body>
+</html>

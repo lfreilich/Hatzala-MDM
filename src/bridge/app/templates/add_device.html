@@ -22,6 +22,9 @@
       <input id="user_name" name="user_name" maxlength="100" placeholder="Full name" required>
       <label for="user_email">Email (optional)</label>
       <input id="user_email" name="user_email" type="email" maxlength="254" placeholder="name@example.com">
+      <label for="hcad_email">HCAD login email</label>
+      <input id="hcad_email" name="hcad_email" type="email" maxlength="254" placeholder="Their HCAD / Microsoft sign-in">
+      <p class="mute" style="font-size:12px;margin:4px 0 0">Filled in on the PCR app's Microsoft sign-in, so they only type their password. Leave empty if this phone doesn't use PCR.</p>
       {% if cfg.PBX_ENABLED %}<label for="ext">Unit / extension (optional)</label>
       <input id="ext" name="ext" maxlength="6" inputmode="numeric" pattern="[0-9]+" placeholder="e.g. 083">
       <p class="mute" style="font-size:12px;margin:4px 0 0">An existing extension keeps its password. A new number is created in FreePBX. It's also the phone's WalkieFleet login.</p>{% endif %}

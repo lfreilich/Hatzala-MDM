@@ -16,6 +16,7 @@ CREATE TABLE IF NOT EXISTS devices (
     description TEXT,
     user_name TEXT,         -- person this device belongs to
     user_email TEXT,
+    hcad_email TEXT,        -- HCAD (Microsoft) login, sent to the PCR app
     ext TEXT,               -- SIP extension
     sip_secret TEXT,
     prov_token TEXT,        -- Linphone provisioning token
@@ -44,7 +45,7 @@ CREATE TABLE IF NOT EXISTS events (
 );
 CREATE TABLE IF NOT EXISTS kv (k TEXT PRIMARY KEY, v TEXT);
 CREATE TABLE IF NOT EXISTS linked_users (  -- WalkieFleet account <-> SIP extension <-> email
-    login TEXT PRIMARY KEY, name TEXT, ext TEXT, email TEXT, updated REAL
+    login TEXT PRIMARY KEY, name TEXT, ext TEXT, email TEXT, hcad_email TEXT, updated REAL
 );
 CREATE TABLE IF NOT EXISTS wifi_networks (  -- offered on Add device; the chosen one goes in the enrollment QR
     id INTEGER PRIMARY KEY AUTOINCREMENT, ssid TEXT NOT NULL, password TEXT, security TEXT NOT NULL,
@@ -67,9 +68,11 @@ def conn() -> sqlite3.Connection:
             _conn.row_factory = sqlite3.Row
             _conn.executescript(SCHEMA)
             have = {r["name"] for r in _conn.execute("PRAGMA table_info(devices)")}
-            for col in ("user_name", "user_email"):
+            for col in ("user_name", "user_email", "hcad_email"):
                 if col not in have:
                     _conn.execute(f"ALTER TABLE devices ADD COLUMN {col} TEXT")
+            if "hcad_email" not in {r["name"] for r in _conn.execute("PRAGMA table_info(linked_users)")}:
+                _conn.execute("ALTER TABLE linked_users ADD COLUMN hcad_email TEXT")
             _conn.commit()
         return _conn
 
@@ -105,7 +108,7 @@ def save_device(d: dict):
     d = dict(d)
     d["steps"] = json.dumps(d.get("steps") or {})
     d["updated"] = time.time()
-    cols = ["number", "hmdm_id", "description", "user_name", "user_email", "ext", "sip_secret", "prov_token", "nc_user", "nc_password",
+    cols = ["number", "hmdm_id", "description", "user_name", "user_email", "hcad_email", "ext", "sip_secret", "prov_token", "nc_user", "nc_password",
             "nc_app_password", "traccar_id", "steps", "last_error", "updated"]
     x(f"INSERT OR REPLACE INTO devices({','.join(cols)}) VALUES ({','.join('?' * len(cols))})",
       tuple(d.get(c) for c in cols))

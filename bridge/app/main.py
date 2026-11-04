@@ -75,7 +75,14 @@ def linphone_provisioning(token: str):
     if not (st.get("ext") and st.get("sip_secret") and config.SIP_DOMAIN):
         raise HTTPException(404)
     display = (st.get("description") or st["number"]).strip()
-    db.log("info", "Linphone fetched its SIP provisioning", st["number"])
+    steps = json.loads(st.get("steps") or "{}")
+    if not steps.get("linphone_fetched"):
+        # Only the first fetch is logged; Linphone re-fetches on every start
+        db.log("info", "Linphone fetched its SIP provisioning", st["number"])
+        full = db.device(st["number"])
+        if full:
+            full["steps"]["linphone_fetched"] = time.time()
+            db.save_device(full)
     return Response(provision.linphone_xml(st, display), media_type="application/xml",
                     headers={"Cache-Control": "no-store"})
 
@@ -235,10 +242,19 @@ def _qr_svg(number: str, legacy: bool, wifi_id: int, host: str | None = None):
     return Response(svg, media_type="image/svg+xml", headers={"Cache-Control": "no-store"})
 
 
-def _register_device(number: str, user_name: str, user_email: str, ext: str):
+def _set_hcad_email(number: str, hcad_email: str):
+    """Store the HCAD login on an existing device; the next sync sends it to the PCR app."""
+    st = db.device(number)
+    if st and hcad_email and st.get("hcad_email") != hcad_email:
+        st["hcad_email"] = hcad_email
+        db.save_device(st)
+        db.log("info", f"HCAD login set to {hcad_email}", number)
+
+
+def _register_device(number: str, user_name: str, user_email: str, ext: str, hcad_email: str = ""):
     """Tie a new Headwind device to its user, then let sync set up their accounts."""
     st = db.device(number) or {"number": number, "steps": {}}
-    st.update(user_name=user_name, user_email=user_email or None, ext=ext or None,
+    st.update(user_name=user_name, user_email=user_email or None, ext=ext or None, hcad_email=hcad_email or None,
               nc_user=provision.user_account(user_name, number))
     db.save_device(st)
     db.log("info", f"Device created for QR enrollment, user {user_name}", number)
@@ -269,16 +285,21 @@ def add_device_page(request: Request, number: str = "", existed: int = 0, error:
 
 @app.post("/add-device")
 def add_device(number: str = Form(...), user_name: str = Form(""), user_email: str = Form(""), ext: str = Form(""),
-               config_id: int = Form(...), description: str = Form(""), wifi_id: int = Form(0)):
+               config_id: int = Form(...), description: str = Form(""), wifi_id: int = Form(0),
+               hcad_email: str = Form("")):
     if wifi_id and not _wifi(wifi_id):
         return RedirectResponse("/add-device?" + urlencode({"error": "That Wi-Fi network was removed."}), status_code=303)
     number = number.strip()
     user_name = user_name.strip()[:100]
     user_email = user_email.strip()[:254]
+    hcad_email = hcad_email.strip().lower()[:254]
     ext = ext.strip()
     if not DEVICE_NUMBER.match(number):
         return RedirectResponse("/add-device?" + urlencode(
             {"error": "Use only letters, numbers, dots, dashes and underscores."}), status_code=303)
+    if hcad_email and not EMAIL.match(hcad_email):
+        return RedirectResponse("/add-device?" + urlencode(
+            {"error": "That HCAD login email doesn't look right."}), status_code=303)
     hw = Headwind()
     existed = any(d.get("number") == number for d in hw.devices())
     if not existed:
@@ -303,7 +324,9 @@ def add_device(number: str = Form(...), user_name: str = Form(""), user_email: s
             db.log("error", f"Could not create device {number}: {e}")
             return RedirectResponse("/add-device?" + urlencode(
                 {"error": f"Headwind refused the new device: {str(e)[:200]}"}), status_code=303)
-        _register_device(number, user_name, user_email, ext)
+        _register_device(number, user_name, user_email, ext, hcad_email)
+    else:
+        _set_hcad_email(number, hcad_email)
     return RedirectResponse("/add-device?" + urlencode(
         {"number": number, "existed": int(existed), "wifi": wifi_id}), status_code=303)
 
@@ -367,7 +390,8 @@ def link_user_page(request: Request, ok: str = "", error: str = ""):
             login = u.get("Login") or ""
             rows.append({"login": login, "name": u.get("Name"), "sip": u.get("SipID") or "",
                          "matchable": bool(re.fullmatch(r"[0-9]{2,6}", login)), "has_ext": login in exts,
-                         "email": (linked.get(login) or {}).get("email", "")})
+                         "email": (linked.get(login) or {}).get("email", ""),
+                         "hcad_email": (linked.get(login) or {}).get("hcad_email") or ""})
     except Exception as e:
         error = error or f"Could not load users: {str(e)[:200]}"
     try:
@@ -378,10 +402,14 @@ def link_user_page(request: Request, ok: str = "", error: str = ""):
 
 
 @app.post("/link-user")
-def link_user(login: str = Form(...), email: str = Form(""), config_id: int = Form(0)):
+def link_user(login: str = Form(...), email: str = Form(""), config_id: int = Form(0), hcad_email: str = Form("")):
     email = email.strip()[:254]
+    hcad_email = hcad_email.strip().lower()[:254]
     if not EMAIL.match(email):
         return RedirectResponse("/link-user?" + urlencode({"error": f"{login}: enter a valid email."}), status_code=303)
+    if hcad_email and not EMAIL.match(hcad_email):
+        return RedirectResponse("/link-user?" + urlencode({"error": f"{login}: the HCAD login email doesn't look right."}),
+                                status_code=303)
     if not config_id:
         return RedirectResponse("/link-user?" + urlencode({"error": f"{login}: choose a phone configuration."}),
                                 status_code=303)
@@ -391,7 +419,11 @@ def link_user(login: str = Form(...), email: str = Form(""), config_id: int = Fo
         existed = any(d.get("number") == login for d in hw.devices())
         if not existed:
             hw.create_device(login, name[:100], config_id, custom1=login)
-            _register_device(login, name[:100], email, login)
+            _register_device(login, name[:100], email, login, hcad_email)
+        else:
+            _set_hcad_email(login, hcad_email)
+        if hcad_email:
+            db.x("UPDATE linked_users SET hcad_email=? WHERE login=?", (hcad_email, login))
     except Exception as e:
         db.log("error", f"Link failed: {e}", login)
         return RedirectResponse("/link-user?" + urlencode({"error": f"{login}: {str(e)[:250]}"}), status_code=303)

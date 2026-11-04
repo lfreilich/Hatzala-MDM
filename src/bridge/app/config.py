@@ -45,6 +45,7 @@ TRACCAR_URL = os.getenv("TRACCAR_URL", "http://127.0.0.1:8082").rstrip("/")
 TRACCAR_ADMIN_EMAIL = os.getenv("TRACCAR_ADMIN_EMAIL", "")
 TRACCAR_ADMIN_PASSWORD = _secret("TRACCAR_ADMIN_PASSWORD")
 TRACKING_INTERVAL = int(os.getenv("TRACKING_INTERVAL", "60"))
+PCR_PKG = os.getenv("PCR_PKG", "org.hatzbs.pcr")  # in-house PCR app; gets the HCAD email as login_hint
 
 # Nextcloud
 NC_URL = os.getenv("NC_URL", "http://127.0.0.1:8083").rstrip("/")

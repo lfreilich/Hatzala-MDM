@@ -50,10 +50,13 @@ def managed_configs(st: dict) -> dict[str, dict]:
             "stop_detection": True,
         }
     if _enabled("linphone") and st.get("prov_token") and st.get("ext") and st.get("sip_secret"):
-        out[PKG["linphone"]] = {"configUri": f"https://{config.OPS_HOST}/prov/linphone/{st['prov_token']}.xml"}
+        out[PKG["linphone"]] = {"configUri": linphone_config_uri(st)}
     if _enabled("nextcloud"):
         out[PKG["nextcloud"]] = {"base_url": f"https://{config.NC_HOST}", "disable_multiaccount": True,
                                  "disable_intro": True}
+    if st.get("hcad_email"):
+        # The PCR app passes this to the Microsoft sign-in page so only the password and MFA are typed
+        out[config.PCR_PKG] = {"login_hint": st["hcad_email"]}
     return out
 
 
@@ -121,12 +124,42 @@ def run_one_time_steps(hw: Headwind, dev: dict, st: dict):
     if _enabled("linphone"):
         once("linphone_perms", PKG["linphone"],
              lambda h, s: h.push(s["number"], "grantPermissions", {"pkg": [PKG["linphone"]]}))
+        push_linphone_config(hw, st, installed)
     if _enabled("nextcloud") and st.get("nc_app_password"):
         once("nextcloud_login", PKG["nextcloud"], send_nextcloud_login)
     if _enabled("davx5") and st.get("nc_app_password"):
         once("contacts_login", PKG["davx5"], send_contacts_login)
         once("davx5_perms", PKG["davx5"],
              lambda h, s: h.push(s["number"], "grantPermissions", {"pkg": [PKG["davx5"]]}))
+
+
+LINPHONE_RETRY = 3600   # resend the config link hourly until Linphone fetches it
+LINPHONE_TRIES = 6
+
+
+def linphone_config_uri(st: dict) -> str:
+    return f"https://{config.OPS_HOST}/prov/linphone/{st['prov_token']}.xml"
+
+
+def push_linphone_config(hw: Headwind, st: dict, installed: set[str]):
+    """Linphone ignores Android managed configs, so open a linphone-config: link on the phone instead.
+    Linphone 6 applies it without asking and re-fetches the URL on every start."""
+    if PKG["linphone"] not in installed or not (st.get("prov_token") and st.get("ext") and st.get("sip_secret")):
+        return
+    steps = st["steps"]
+    want = hashlib.sha1(f"{st['prov_token']}|{st['ext']}".encode()).hexdigest()[:12]
+    if steps.get("linphone_cfg_id") != want:   # new device, or extension changed
+        steps.update(linphone_cfg_id=want, linphone_cfg_sent=0, linphone_cfg_tries=0)
+        steps.pop("linphone_fetched", None)
+    if steps.get("linphone_fetched"):
+        return
+    tries = steps.get("linphone_cfg_tries", 0)
+    if tries >= LINPHONE_TRIES or time.time() - steps.get("linphone_cfg_sent", 0) < LINPHONE_RETRY:
+        return
+    hw.push(st["number"], "intent", {"action": "android.intent.action.VIEW",
+                                     "data": "linphone-config:" + linphone_config_uri(st)})
+    steps.update(linphone_cfg_sent=time.time(), linphone_cfg_tries=tries + 1)
+    db.log("info", f"Sent Linphone setup link for extension {st['ext']} (try {tries + 1})", st["number"])
 
 
 # ---------------------------------------------------------------- per-service account setup
@@ -214,7 +247,7 @@ def linphone_xml(st: dict, display: str) -> str:
             + e("username", st["ext"]) + e("userid", st["ext"]) + e("passwd", st["sip_secret"])
             + e("domain", dom) +
             '  </section>\n'
-            '  <section name="app">\n' + e("first_launch", 0) + e("auto_start", 1) + '  </section>\n'
+            '  <section name="app">\n' + e("first_launch", 0) + e("first_6.0_launch", 0) + e("auto_start", 1) + '  </section>\n'
             '</config>\n')
 
 
@@ -422,11 +455,17 @@ def sync_all(force_apps=False):
     hw = Headwind()
     last_apps = db.kv_get("apps_bootstrap_ts", 0)
     app_ids = db.kv_get("app_ids", {})
-    incomplete = len(app_ids) < len(config.ENABLED_APPS)
+    incomplete = any(PKG.get(a) and PKG[a] not in app_ids for a in config.ENABLED_APPS)
     if force_apps or incomplete or time.time() - last_apps > 86400:
         app_ids = {**app_ids, **apps.register_all(hw)}
         db.kv_set("app_ids", app_ids)
         db.kv_set("apps_bootstrap_ts", time.time())
+    if config.PCR_PKG not in app_ids and db.q("SELECT 1 FROM devices WHERE hcad_email IS NOT NULL LIMIT 1"):
+        # PCR is uploaded to Headwind by hand, so look up its id rather than registering it
+        pcr = next((a for a in hw.applications() if a.get("pkg") == config.PCR_PKG and a.get("id")), None)
+        if pcr:
+            app_ids[config.PCR_PKG] = pcr["id"]
+            db.kv_set("app_ids", app_ids)
 
     tc = Traccar() if _enabled("traccar") else None
     nc = Nextcloud() if (_enabled("nextcloud") or _enabled("davx5")) else None

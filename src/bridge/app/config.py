@@ -15,7 +15,8 @@ def _b(name: str, default: str = "false") -> bool:
     return os.getenv(name, default).strip().lower() in ("1", "true", "yes", "y", "on")
 
 
-DOMAIN = os.getenv("DOMAIN", "hbs-mdm.cloud")
+DOMAIN = os.getenv("DOMAIN", "hatzala-mdm.com")
+PUBLIC_IP = os.getenv("PUBLIC_IP", "72.62.58.146")  # by-address enrollment, for networks whose DNS hides DOMAIN
 OPS_HOST = os.getenv("OPS_HOST", f"ops.{DOMAIN}")
 TRACK_HOST = os.getenv("TRACK_HOST", f"track.{DOMAIN}")
 MAP_HOST = os.getenv("MAP_HOST", f"map.{DOMAIN}")
@@ -26,6 +27,9 @@ RUSTDESK_HOST = os.getenv("RUSTDESK_HOST", f"rd.{DOMAIN}")
 DATA_DIR = os.getenv("BRIDGE_DATA", "/data")
 APK_DIR = os.path.join(DATA_DIR, "apk")
 DB_PATH = os.path.join(DATA_DIR, "bridge.sqlite3")
+# Owners approve new admins and remove admins. Set only in .env, so nobody can make themselves an owner from the web.
+ADMIN_OWNERS = {e.strip().lower() for e in os.getenv("ADMIN_OWNERS", "").split(",") if e.strip()}
+GATE_EMAILS_FILE = os.getenv("GATE_EMAILS_FILE", "/gate/allowed-emails.txt")  # Google accounts allowed past the gate
 BIND_PORT = int(os.getenv("BRIDGE_PORT", "8090"))
 SYNC_INTERVAL = int(os.getenv("SYNC_INTERVAL", "300"))
 

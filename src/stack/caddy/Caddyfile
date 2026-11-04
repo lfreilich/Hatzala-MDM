@@ -36,6 +36,9 @@ http://{$DOMAIN}, https://{$DOMAIN} {
 		import gate
 		reverse_proxy 127.0.0.1:8090
 	}
+	handle /hbs-logout {
+		reverse_proxy 127.0.0.1:8090
+	}
 	# 1) Admin APIs used by the web panel -> 2FA
 	@adminapi path_regexp adminapi ^/rest/(private/|plugin/main/|plugins/[^/]+/(private/|[^/]*-plugin-settings)|public/(auth|jwt|passwordReset|signup))
 	handle @adminapi {
@@ -61,6 +64,26 @@ http://{$DOMAIN}, https://{$DOMAIN} {
 	}
 }
 
+# By-address enrolment for networks whose DNS hides the domain: device traffic only, nothing for browsers
+http://{$PUBLIC_IP:72.62.58.146} {
+	import common
+	# Same split as the domain: admin APIs are never served here, other /rest and /files are device traffic
+	@ipadmin path_regexp ipadmin ^/rest/(private/|plugin/main/|plugins/[^/]+/(private/|[^/]*-plugin-settings)|public/(auth|jwt|passwordReset|signup))
+	handle @ipadmin {
+		respond 404
+	}
+	@device path_regexp ipdevice ^/(rest|files)/
+	handle @device {
+		reverse_proxy 127.0.0.1:8080 {
+			flush_interval -1
+			transport http {
+				read_timeout 10m
+			}
+		}
+	}
+	respond 404
+}
+
 auth.{$DOMAIN} {
 	import common
 	reverse_proxy 127.0.0.1:4180
@@ -76,6 +99,9 @@ ops.{$DOMAIN} {
 		reverse_proxy 127.0.0.1:8090
 	}
 	handle /signed-out {
+		reverse_proxy 127.0.0.1:8090
+	}
+	handle /logout {
 		reverse_proxy 127.0.0.1:8090
 	}
 	handle /static/* {
@@ -98,9 +124,14 @@ map.{$DOMAIN} {
 		import gate
 		reverse_proxy 127.0.0.1:8090
 	}
-	import gate
-	header Content-Security-Policy "frame-ancestors 'self' https://ops.{$DOMAIN}"
-	reverse_proxy 127.0.0.1:8082
+	handle /hbs-logout {
+		reverse_proxy 127.0.0.1:8090
+	}
+	handle {
+		import gate
+		header Content-Security-Policy "frame-ancestors 'self' https://ops.{$DOMAIN}"
+		reverse_proxy 127.0.0.1:8082
+	}
 }
 
 # Traccar Client position reports (OsmAnd protocol) - must be open for phones
@@ -116,6 +147,9 @@ cloud.{$DOMAIN} {
 	}
 	handle /hbs-sso {
 		import gate
+		reverse_proxy 127.0.0.1:8090
+	}
+	handle /hbs-logout {
 		reverse_proxy 127.0.0.1:8090
 	}
 	redir /.well-known/carddav /remote.php/dav 301
@@ -146,4 +180,12 @@ dns.{$DOMAIN} {
 # Gives RustDesk's hostname a certificate-backed landing page (the ports themselves are direct)
 rd.{$DOMAIN} {
 	respond "HBS RustDesk relay" 200
+}
+
+# Old name: Bezeq's cyber protection blocks it, so send anything still using it to the new one
+hbs-mdm.cloud, ops.hbs-mdm.cloud, map.hbs-mdm.cloud, cloud.hbs-mdm.cloud, track.hbs-mdm.cloud, dns.hbs-mdm.cloud, auth.hbs-mdm.cloud, rd.hbs-mdm.cloud, http://hbs-mdm.cloud {
+	map {host} {newhost} {
+		~^(.*)hbs-mdm\.cloud$ "${1}hatzala-mdm.com"
+	}
+	redir https://{newhost}{uri} 308
 }

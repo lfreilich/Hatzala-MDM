@@ -71,9 +71,12 @@ class Headwind:
                 return out
             page += 1
 
-    def create_device(self, number: str, description: str, config_id: int):
-        return self._req("PUT", "/private/devices",
-                         json={"number": number, "description": description, "configurationId": config_id})
+    def create_device(self, number: str, description: str, config_id: int, custom1: str = ""):
+        """custom1 holds the WalkieFleet login: the agent writes it into wfinit.cfg in place of the word CUSTOM1."""
+        body = {"number": number, "description": description, "configurationId": config_id}
+        if custom1:
+            body["custom1"] = custom1
+        return self._req("PUT", "/private/devices", json=body)
 
     def delete_device(self, device_id: int):
         self._req("DELETE", f"/private/devices/{device_id}")

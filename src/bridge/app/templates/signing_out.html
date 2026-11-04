@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Signing out · HBS</title>
+<noscript><meta http-equiv="refresh" content="4;url={{ gate }}"></noscript>
+<link rel="icon" type="image/png" href="/static/logo.png">
+<style>
+:root{color-scheme:dark;--bg:hsl(232 78% 13%);--card:hsl(232 70% 18%);--ink:#fff;--mute:hsl(220 20% 75%);--line:hsl(232 50% 28%)}
+body{margin:0;min-height:100vh;display:grid;place-items:center;padding:16px;box-sizing:border-box;background:var(--bg);color:var(--ink);font:14px/1.45 Inter,Heebo,system-ui,-apple-system,Segoe UI,Roboto,sans-serif}
+div{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:24px;max-width:340px;text-align:center}
+img.logo{height:96px;width:auto;margin-bottom:12px}
+h1{font-size:18px;margin:0 0 8px}p{margin:0;color:var(--mute)}
+</style>
+</head>
+<body><div>
+  <img class="logo" src="/static/logo.png" alt="Hatzala Beit Shemesh">
+  <h1>Signing out…</h1>
+  <p>Ending your sessions in every module.</p>
+</div>
+<script>
+(function(){
+  var steps={{ steps|tojson }}, gate={{ gate|tojson }}, left=steps.length, gone=false;
+  function next(){ if(!gone){ gone=true; location.replace(gate); } }
+  steps.forEach(function(u){
+    var i=new Image(); i.onload=i.onerror=function(){ if(--left<=0) next(); };
+    i.src=u+'&t='+Date.now();
+  });
+  setTimeout(next, 6000);  // don't let one slow module stop the sign-out
+})();
+</script>
+</body>
+</html>

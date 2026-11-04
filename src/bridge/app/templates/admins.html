@@ -1,0 +1,89 @@
+{% extends "base.html" %}
+{% block body %}
+<div class="card">
+  <h2>{% if owner %}Add an admin{% else %}Propose an admin{% endif %}</h2>
+  <p class="mute">Admins manage phones and settings. They sign in once with Google, and that also signs them in to Headwind, the map and Nextcloud.
+    {% if owner %}You're an owner, so the person is added straight away.
+    {% else %}An owner has to approve the request. Until then the person has no access and no accounts.{% endif %}
+    Phone users are different: set them up under <a href="/link-user">Link user</a>. They never sign in here.</p>
+  {% if ok %}<p style="color:var(--ok)">{{ ok }}</p>{% endif %}
+  {% if error %}<p class="err">{{ error }}</p>{% endif %}
+  <form method="post" action="/admins" style="display:flex;gap:8px;flex-wrap:wrap;align-items:center"
+        onsubmit="if(this.dataset.sent)return false;this.dataset.sent=1;var b=this.querySelector('button');b.disabled=true;b.textContent='Working...'">
+    <input type="email" name="email" placeholder="Google email, e.g. name@gmail.com" required maxlength="50" style="width:260px">
+    <input name="name" placeholder="Name (optional)" maxlength="50" style="width:180px">
+    <button class="primary">{% if owner %}Add admin{% else %}Request approval{% endif %}</button>
+  </form>
+</div>
+
+{% if pending %}
+<div class="card">
+  <h2>Waiting for an owner's approval</h2>
+  <table>
+    <tr><th>Google account</th><th>Asked by</th><th>When</th><th></th></tr>
+    {% for p in pending %}
+    <tr>
+      <td><b>{{ p.email }}</b><br><span class="mute">{{ p.name or '' }}</span></td>
+      <td>{{ p.requested_by }}</td>
+      <td><span data-ts="{{ p.requested }}"></span></td>
+      <td style="white-space:nowrap">
+        {% if owner %}
+        <form class="inline" method="post" action="/admins/approve"
+              onsubmit="if(!confirm('Give {{ p.email }} full admin access?'))return false;var b=this.querySelector('button');b.disabled=true;b.textContent='Approving...'">
+          <input type="hidden" name="email" value="{{ p.email }}"><button class="primary">Approve</button></form>
+        {% endif %}
+        {% if owner or p.requested_by == me %}
+        <form class="inline" method="post" action="/admins/reject"><input type="hidden" name="email" value="{{ p.email }}">
+          <button>{% if owner %}Reject{% else %}Cancel request{% endif %}</button></form>
+        {% endif %}
+      </td>
+    </tr>
+    {% endfor %}
+  </table>
+</div>
+{% endif %}
+
+<div class="card">
+  <h2>Admins</h2>
+  <table>
+    <tr><th>Google account</th>{% for a in apps %}<th>{{ labels[a] }}</th>{% endfor %}<th></th></tr>
+    {% for r in rows %}
+    {% set mine = owner or r.email == me %}
+    <tr>
+      <td><b>{{ r.email }}</b>{% if r.owner %} <span class="pill ok">owner</span>{% endif %}{% if r.email == me %} <span class="pill">you</span>{% endif %}</td>
+      {% for a in apps %}
+      <td>
+        {% if r.apps.get(a) %}<span class="pill ok" title="Signs in as {{ r.apps[a] }}">auto sign-in</span>
+        {% else %}<span class="pill">needs setup</span>
+          {% if mine %}
+          <form class="inline" method="post" action="/admins/repair"><input type="hidden" name="email" value="{{ r.email }}">
+            <input type="hidden" name="app_name" value="{{ a }}"><button>Set up</button></form>
+          <details style="margin-top:4px"><summary class="mute" style="cursor:pointer;font-size:12px">Use existing password</summary>
+            <form method="post" action="/admins/existing" style="display:grid;gap:4px;margin-top:4px;max-width:220px">
+              <input type="hidden" name="email" value="{{ r.email }}"><input type="hidden" name="app_name" value="{{ a }}">
+              <input name="login" placeholder="{{ labels[a] }} login" required autocomplete="off">
+              <input type="password" name="password" placeholder="Password" required autocomplete="new-password">
+              <button>Check and save</button>
+            </form></details>
+          {% endif %}
+        {% endif %}
+      </td>
+      {% endfor %}
+      <td style="white-space:nowrap">
+        {% if mine %}
+        <form class="inline" method="post" action="/admins/repair"><input type="hidden" name="email" value="{{ r.email }}">
+          <button title="Gives each app account a new password and stores it">Repair sign-in</button></form>
+        {% endif %}
+        {% if owner and r.email != me and not r.owner %}
+        <form class="inline" method="post" action="/admins/remove"
+              onsubmit="return confirm('Remove {{ r.email }}? They lose access straight away, and their Headwind and map accounts are deleted.')">
+          <input type="hidden" name="email" value="{{ r.email }}"><button>Remove</button></form>
+        {% endif %}
+      </td>
+    </tr>
+    {% else %}<tr><td colspan="5" class="mute">No admins found.</td></tr>{% endfor %}
+  </table>
+  <p class="mute" style="font-size:12px;margin-bottom:0">Owners approve and remove admins. Owners themselves are set on the server, not on this page.
+    Remove takes effect on their next click. Their Nextcloud account is disabled, not deleted, so files are kept.</p>
+</div>
+{% endblock %}

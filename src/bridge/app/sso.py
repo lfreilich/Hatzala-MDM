@@ -7,6 +7,7 @@ AdGuard is not here because Caddy already sends its one admin login on every req
 """
 import hashlib
 import re
+from urllib.parse import quote
 
 import httpx
 
@@ -51,6 +52,54 @@ def _nextcloud(login: str, password: str) -> list[str]:
     if r.status_code != 303 or "/login" in r.headers.get("location", ""):
         raise ApiError(f"Nextcloud login -> {r.status_code}")
     return cookies + r.headers.get_list("set-cookie")
+
+
+def _end_headwind(cookie: str):
+    r = httpx.post(f"{config.HMDM_URL.rstrip('/')}/rest/public/auth/logout", timeout=TIMEOUT, headers={"Cookie": cookie})
+    if r.status_code >= 400:
+        raise ApiError(f"Headwind logout -> {r.status_code}")
+
+
+def _end_traccar(cookie: str):
+    r = httpx.delete(f"{config.TRACCAR_URL}/api/session", timeout=TIMEOUT, headers={"Cookie": cookie})
+    if r.status_code >= 400:
+        raise ApiError(f"Traccar logout -> {r.status_code}")
+
+
+def _end_nextcloud(cookie: str):
+    base = {"Host": config.NC_HOST, "X-Forwarded-Proto": "https", "Cookie": cookie}
+    token = httpx.get(f"{config.NC_URL}/index.php/csrftoken", headers=base, timeout=TIMEOUT).json()["token"]
+    r = httpx.get(f"{config.NC_URL}/index.php/logout", params={"requesttoken": token}, headers=base, timeout=TIMEOUT)
+    if r.status_code != 303:
+        raise ApiError(f"Nextcloud logout -> {r.status_code}")
+
+
+def gate_sign_out() -> str:
+    return f"https://auth.{config.DOMAIN}/oauth2/sign_out?rd=" + quote(f"https://{config.OPS_HOST}/signed-out", safe="")
+
+
+def logout_steps() -> dict:
+    """Each app host's sign-out and, for the fallback redirect chain, the next hop.
+    One host at a time because each app's cookies are only visible on its own host. The gate goes last."""
+    return {config.NC_HOST: (_end_nextcloud, f"https://{config.MAP_HOST}/hbs-logout"),
+            config.MAP_HOST: (_end_traccar, f"https://{config.DOMAIN}/hbs-logout?ngsw-bypass=1"),
+            config.DOMAIN: (_end_headwind, gate_sign_out())}
+
+
+def app_cookies(cookie: str) -> list[str]:
+    """This host's name=value pairs. The gate cookie is shared by every host and is left for the gate's own sign-out."""
+    return [p.strip() for p in cookie.split(";") if "=" in p and not p.strip().startswith("_oauth2_proxy")]
+
+
+def logout(host: str, cookie: str) -> list[str]:
+    """Set-Cookie values that clear this browser's session. It is cleared even if the app can't be told."""
+    pairs = app_cookies(cookie)
+    if pairs:
+        try:
+            logout_steps()[host][0]("; ".join(pairs))
+        except Exception as e:
+            db.log("error", f"Sign-out failed for {host}: {e}")
+    return [f"{p.split('=', 1)[0]}=; Path=/; Max-Age=0; Secure; HttpOnly" for p in pairs]
 
 
 def login_cookies(host: str, email: str) -> list[str]:

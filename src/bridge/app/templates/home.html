@@ -70,7 +70,7 @@ body[data-view=left] #left{flex:1}
 <aside>
   <div class="brand"><img src="/static/logo.png" alt="Hatzala Beit Shemesh"><span>Hatzala Beit Shemesh<small>Control panel</small></span></div>
   <nav id="nav" aria-label="Modules"></nav>
-  <div class="who">{% if user %}<span class="who-name">{{ user }}<br></span>{% endif %}<a style="color:var(--acc)" href="https://auth.{{ cfg.DOMAIN }}/oauth2/sign_out?rd={{ ('https://' ~ cfg.OPS_HOST ~ '/signed-out')|urlencode|replace('/', '%2F') }}">Log out</a></div>
+  <div class="who">{% if user %}<span class="who-name">{{ user }}<br></span>{% endif %}<a style="color:var(--acc)" href="https://{{ cfg.OPS_HOST }}/logout">Log out</a></div>
 </aside>
 <main>
   <div class="bar">
@@ -97,20 +97,24 @@ const I={
   remote:'<rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 16v4"/>',
   book:'<path d="M5 4h12a2 2 0 0 1 2 2v14H7a2 2 0 0 1-2-2z"/><path d="M9 9h6M9 13h6"/>',
   radio:'<rect x="6" y="8" width="12" height="13" rx="2"/><path d="M9 8V3M10 13h4M10 17h4"/>',
-  grid:'<rect x="4" y="4" width="7" height="7" rx="1"/><rect x="13" y="4" width="7" height="7" rx="1"/><rect x="4" y="13" width="7" height="7" rx="1"/><rect x="13" y="13" width="7" height="7" rx="1"/>'
+  grid:'<rect x="4" y="4" width="7" height="7" rx="1"/><rect x="13" y="4" width="7" height="7" rx="1"/><rect x="4" y="13" width="7" height="7" rx="1"/><rect x="13" y="13" width="7" height="7" rx="1"/>',
+  users:'<circle cx="9" cy="8" r="3.5"/><path d="M2.5 20a6.5 6.5 0 0 1 13 0"/><path d="M16 4.6a3.5 3.5 0 0 1 0 6.8M18.5 14.2A6.5 6.5 0 0 1 21.5 20"/>',
+  wifi:'<path d="M2.5 9a14 14 0 0 1 19 0"/><path d="M5.5 12.5a9.5 9.5 0 0 1 13 0"/><path d="M8.7 16a5 5 0 0 1 6.6 0"/><circle cx="12" cy="19.3" r="1"/>'
 };
 /* ngsw-bypass: Headwind's service worker would otherwise answer this from cache, skipping sign-on */
 const HEADWIND='https://{{ cfg.DOMAIN }}/hbs-sso?ngsw-bypass=1';
 const MODULES=[
   {id:'devices',label:'Device ops',icon:'grid',url:'/'},
   {id:'add',label:'Add device',icon:'phone',url:'/add-device'},
+  {id:'wifi',label:'Setup Wi-Fi',icon:'wifi',url:'/wifi'},
   {id:'link',label:'Link user',icon:'book',url:'/link-user'},
   {id:'fleet',label:'WalkieFleet ↗',icon:'radio',url:'https://20.217.192.70:8443/',external:true},
   {id:'map',label:'Location',icon:'pin',url:'https://{{ cfg.MAP_HOST }}/hbs-sso'},
   {id:'files',label:'Files & contacts',icon:'cloud',url:'https://{{ cfg.NC_HOST }}/hbs-sso'},
   {id:'dns',label:'DNS filter',icon:'shield',url:'https://{{ cfg.DNS_HOST }}/'},
   {id:'remote',label:'Remote support',icon:'remote',url:'/rustdesk'},
-  {id:'directory',label:'Directory',icon:'book',url:'/directory'}
+  {id:'directory',label:'Directory',icon:'book',url:'/directory'},
+  {id:'admins',label:'Admins',icon:'users',url:'/admins'}
 ];
 const store={get(k){try{return localStorage.getItem(k)}catch(e){return null}},set(k,v){try{localStorage.setItem(k,v)}catch(e){}}};
 const $=id=>document.getElementById(id);

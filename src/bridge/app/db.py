@@ -46,6 +46,13 @@ CREATE TABLE IF NOT EXISTS kv (k TEXT PRIMARY KEY, v TEXT);
 CREATE TABLE IF NOT EXISTS linked_users (  -- WalkieFleet account <-> SIP extension <-> email
     login TEXT PRIMARY KEY, name TEXT, ext TEXT, email TEXT, updated REAL
 );
+CREATE TABLE IF NOT EXISTS wifi_networks (  -- offered on Add device; the chosen one goes in the enrollment QR
+    id INTEGER PRIMARY KEY AUTOINCREMENT, ssid TEXT NOT NULL, password TEXT, security TEXT NOT NULL,
+    hidden INTEGER DEFAULT 0, updated REAL
+);
+CREATE TABLE IF NOT EXISTS admin_requests (  -- proposed admins: no accounts and no gate access until an owner approves
+    email TEXT PRIMARY KEY, name TEXT, requested_by TEXT, requested REAL
+);
 CREATE TABLE IF NOT EXISTS sso_accounts (  -- which app login each approved Google account signs in as
     email TEXT, app TEXT, login TEXT, password TEXT, PRIMARY KEY (email, app)
 );

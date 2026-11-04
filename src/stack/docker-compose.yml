@@ -42,7 +42,7 @@ services:
       - --reverse-proxy=true
       - --set-xauthrequest=true
       - --skip-provider-button=true
-      - --approval-prompt=auto
+      - --prompt=select_account
       - --upstream=static://202
       - --authenticated-emails-file=/etc/oauth2-proxy/allowed-emails.txt
     volumes:
@@ -166,4 +166,5 @@ services:
       - ./data/apk:/data/apk
       - ./data/rustdesk:/rustdesk:ro
       - ./secrets:/secrets:ro
+      - ./oauth2-proxy/allowed-emails.txt:/gate/allowed-emails.txt  # Admins page edits the gate list
     <<: *logging

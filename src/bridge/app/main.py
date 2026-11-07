@@ -18,7 +18,7 @@ from fastapi.responses import HTMLResponse, PlainTextResponse, RedirectResponse,
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
-from . import admins, claude_page, config, db, provision, sso, walkiefleet
+from . import admins, claude_page, config, db, playstore, provision, sso, walkiefleet
 from .clients import ApiError, Headwind
 
 app = FastAPI(title="hbs-bridge", docs_url=None, redoc_url=None)
@@ -517,6 +517,70 @@ def admins_remove(request: Request, email: str = Form(...)):
         return _back(error=str(e)[:300])
 
 
+# ------------------------------------------------------------------ Play Store: fetch APKs from Google Play
+def _play_back(**q):
+    return RedirectResponse("/playstore?" + urlencode({k: v for k, v in q.items() if v}), status_code=303)
+
+
+@app.get("/playstore", response_class=HTMLResponse)
+def playstore_page(request: Request, ok: str = "", error: str = ""):
+    try:
+        configs = Headwind().configurations()
+    except Exception:
+        configs = []
+    jobs = playstore.jobs()
+    return templates.TemplateResponse("playstore.html", _ctx(
+        request, account=playstore.account(), apps=playstore.apps(), jobs=jobs, configs=configs,
+        running=any(j.get("state") == "running" for j in jobs.values()), device=playstore.DEVICE,
+        owner=admins.is_owner(_actor(request)), ok=ok, error=error), headers={"Cache-Control": "no-store"})
+
+
+@app.post("/playstore/account")
+def playstore_connect(request: Request, email: str = Form(...), oauth_token: str = Form(...)):
+    try:
+        admins.require_owner(_actor(request), "connect the Google Play account")
+        playstore.connect(email, oauth_token, _actor(request))
+        return _play_back(ok="Google account connected.")
+    except Exception as e:
+        return _play_back(error=str(e)[:400])
+
+
+@app.post("/playstore/account/delete")
+def playstore_disconnect(request: Request):
+    try:
+        admins.require_owner(_actor(request), "disconnect the Google Play account")
+        playstore.disconnect(_actor(request))
+        return _play_back(ok="Google account disconnected and its token deleted.")
+    except Exception as e:
+        return _play_back(error=str(e)[:400])
+
+
+@app.post("/playstore/fetch")
+def playstore_fetch(request: Request, pkg: str = Form(...)):
+    try:
+        pkg = playstore.start_fetch(pkg, _actor(request))
+        return _play_back(ok=f"Downloading {pkg}. This page refreshes until it's done.")
+    except Exception as e:
+        return _play_back(error=str(e)[:400])
+
+
+@app.post("/playstore/publish")
+async def playstore_publish(request: Request):
+    form = await request.form()
+    pkg = str(form.get("pkg") or "")
+    try:
+        ids = [int(c) for c in form.getlist("config_id") if str(c).isdigit()]
+        return _play_back(ok=f"{pkg}: " + playstore.publish(pkg, ids, _actor(request)))
+    except Exception as e:
+        return _play_back(error=f"{pkg}: {str(e)[:400]}")
+
+
+@app.post("/playstore/forget")
+def playstore_forget(request: Request, pkg: str = Form(...)):
+    playstore.forget(pkg, _actor(request))
+    return _play_back(ok=f"{pkg} removed from this list. Anything already in Headwind is unchanged.")
+
+
 # ------------------------------------------------------------------ hidden /claude page (owners only)
 claude_page.register(app, templates, _ctx)
 
@@ -565,6 +629,7 @@ def set_sip(number: str, ext: str = Form(""), secret: str = Form("")):
 ACTIONS = {
     "reboot": lambda hw, st: hw.push(st["number"], "reboot"),
     "track": provision.start_tracking,
+    "trackstop": provision.stop_tracking,
     "nclogin": provision.send_nextcloud_login,
     "contacts": provision.send_contacts_login,
     "config": lambda hw, st: hw.push(st["number"], "configUpdated"),
@@ -588,6 +653,8 @@ def device_action(number: str, action: str):
         threading.Thread(target=_sync, daemon=True).start()
     else:
         ACTIONS[action](Headwind(), st)
+        if action in ("track", "trackstop"):
+            db.save_device(st)
         db.log("info", f"Action sent: {action}", number)
     return RedirectResponse("/", status_code=303)
 

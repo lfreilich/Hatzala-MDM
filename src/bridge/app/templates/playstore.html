@@ -1,0 +1,98 @@
+{% extends "base.html" %}
+{% block body %}
+<style>
+.ps label{display:block;font-size:12px;color:var(--mute);margin:10px 0 4px}
+.ps ol{margin:6px 0 0 18px;padding:0}.ps li{margin:3px 0}
+.ps details summary{cursor:pointer;color:var(--acc)}
+.ps .cfgs label{display:inline-flex;gap:4px;align-items:center;margin:2px 10px 2px 0;color:var(--ink);font-size:12px}
+</style>
+<div class="ps">
+{% if ok %}<div class="card" style="color:var(--ok)">{{ ok }}</div>{% endif %}
+{% if error %}<div class="card err">{{ error }}</div>{% endif %}
+
+<div class="card">
+  <h2>Google account</h2>
+  {% if account %}
+    <p>Connected as <b>{{ account.email }}</b> <span class="mute">· by {{ account.by }} · <span data-ts="{{ account.added }}"></span></span></p>
+    {% if owner %}
+    <form class="inline" method="post" action="/playstore/account/delete" onsubmit="return confirm('Disconnect {{ account.email }} and delete its token?')">
+      <button style="color:var(--err)">Disconnect</button></form>
+    <button type="button" onclick="document.getElementById('connect').hidden=false;this.hidden=true">Switch account</button>
+    {% endif %}
+  {% elif not owner %}
+    <p class="mute">No Google account is connected. An owner has to connect one first.</p>
+  {% endif %}
+  {% if owner and not account %}
+  <p class="mute">Use a separate Google account made only for this, not a personal one or the HBS admin account. Google can close accounts that download through tools other than the Play Store app. Free apps only.</p>
+  <ol class="mute">
+    <li>In a desktop browser, open <a href="https://accounts.google.com/EmbeddedSetup" target="_blank" rel="noopener">accounts.google.com/EmbeddedSetup</a> and open the developer tools (F12) on the <b>Network</b> tab.</li>
+    <li>Sign in with that account. If Google's terms come up, click <b>I agree</b> and wait a few seconds.</li>
+    <li>Pick the last request to accounts.google.com, open its <b>Cookies</b> tab, and copy the value of <code>oauth_token</code> (it starts with <code>oauth2_4/</code>).</li>
+    <li>Paste it below within a few minutes. It works only once; the server swaps it for a lasting token.</li>
+  </ol>
+  {% endif %}
+  {% if owner %}
+  <form method="post" action="/playstore/account" id="connect" {% if account %}hidden{% endif %}
+        style="display:flex;gap:8px;flex-wrap:wrap;align-items:end;margin-top:8px"
+        onsubmit="var b=this.querySelector('button');b.disabled=true;b.textContent='Connecting...'">
+    <div><label for="g-email">Google email</label><input id="g-email" type="email" name="email" required maxlength="100" style="width:240px" autocomplete="off"></div>
+    <div><label for="g-token">oauth_token cookie</label><input id="g-token" name="oauth_token" required maxlength="2000" style="width:320px" autocomplete="off" placeholder="oauth2_4/..."></div>
+    <button class="primary">Connect</button>
+  </form>
+  {% endif %}
+</div>
+
+<div class="card">
+  <h2>Get an app from Google Play</h2>
+  <form method="post" action="/playstore/fetch" style="display:flex;gap:8px;flex-wrap:wrap;align-items:center"
+        onsubmit="var b=this.querySelector('button');b.disabled=true;b.textContent='Starting...'">
+    <input name="pkg" required maxlength="300" style="width:420px" placeholder="Package name (com.whatsapp) or the play.google.com link" {% if not account %}disabled{% endif %}>
+    <button class="primary" {% if not account %}disabled{% endif %}>Download APK</button>
+  </form>
+  <p class="mute" style="margin-bottom:0">Google Play sends the version for a <code>{{ device }}</code> phone (64-bit ARM). The APK is then kept on this server; <b>Publish</b> adds it to Headwind and, if you tick configurations, installs it on those phones.</p>
+</div>
+
+{% set active = jobs.items() | selectattr('1.state', 'ne', 'done') | list %}
+{% if active %}
+<div class="card">
+  <h2>Downloads</h2>
+  <table>
+    {% for pkg, j in active %}
+    <tr><td><code>{{ pkg }}</code></td>
+      <td>{% if j.state == 'running' %}<span class="pill">working</span>{% else %}<span class="err">failed</span>{% endif %}</td>
+      <td class="{{ 'err' if j.state == 'error' else 'mute' }}">{{ j.message }}</td></tr>
+    {% endfor %}
+  </table>
+</div>
+{% endif %}
+
+<div class="card">
+  <h2>Downloaded APKs</h2>
+  {% if apps %}
+  <table>
+    <tr><th>App</th><th>Version</th><th>Downloaded</th><th>Publish to Headwind</th><th></th></tr>
+    {% for a in apps %}
+    <tr>
+      <td><b>{{ a.label }}</b><br><code>{{ a.pkg }}</code>
+        {% if a.split_required %}<br><span class="err" title="Google ships this app as an app bundle. The base APK alone may refuse to install or crash.">needs split APKs, may not install</span>{% endif %}</td>
+      <td>{{ a.version }}<br><span class="mute">code {{ a.code }} · {{ (a.size / 1048576) | round(1) }} MB</span></td>
+      <td><span data-ts="{{ a.fetched }}"></span><br><span class="mute">{{ a.by }}</span><br>
+        <a href="/apk/{{ a.file }}" download>Download file</a></td>
+      <td>
+        <form method="post" action="/playstore/publish" onsubmit="var b=this.querySelector('button');b.disabled=true;b.textContent='Publishing...'">
+          <input type="hidden" name="pkg" value="{{ a.pkg }}">
+          <div class="cfgs">{% for c in configs %}<label><input type="checkbox" name="config_id" value="{{ c.id }}">{{ c.name }}</label>{% endfor %}</div>
+          <button class="primary">{% if a.published_file == a.file %}Publish again{% else %}Publish{% endif %}</button>
+          {% if a.published_file == a.file %}<span class="pill ok">in Headwind</span>{% elif a.hmdm_id %}<span class="pill">older version in Headwind</span>{% endif %}
+        </form>
+      </td>
+      <td><form class="inline" method="post" action="/playstore/forget" onsubmit="return confirm('Remove {{ a.pkg }} from this list?')">
+        <input type="hidden" name="pkg" value="{{ a.pkg }}"><button>Remove</button></form></td>
+    </tr>
+    {% endfor %}
+  </table>
+  {% else %}<p class="mute">Nothing downloaded yet.</p>{% endif %}
+</div>
+</div>
+{% if running %}<script>setTimeout(function(){location.href='/playstore'},5000)</script>{% endif %}
+{% endblock %}

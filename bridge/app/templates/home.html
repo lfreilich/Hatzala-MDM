@@ -99,6 +99,7 @@ const I={
   radio:'<rect x="6" y="8" width="12" height="13" rx="2"/><path d="M9 8V3M10 13h4M10 17h4"/>',
   grid:'<rect x="4" y="4" width="7" height="7" rx="1"/><rect x="13" y="4" width="7" height="7" rx="1"/><rect x="4" y="13" width="7" height="7" rx="1"/><rect x="13" y="13" width="7" height="7" rx="1"/>',
   users:'<circle cx="9" cy="8" r="3.5"/><path d="M2.5 20a6.5 6.5 0 0 1 13 0"/><path d="M16 4.6a3.5 3.5 0 0 1 0 6.8M18.5 14.2A6.5 6.5 0 0 1 21.5 20"/>',
+  download:'<path d="M12 3v12"/><path d="M7 10l5 5 5-5"/><path d="M4 19h16"/>',
   wifi:'<path d="M2.5 9a14 14 0 0 1 19 0"/><path d="M5.5 12.5a9.5 9.5 0 0 1 13 0"/><path d="M8.7 16a5 5 0 0 1 6.6 0"/><circle cx="12" cy="19.3" r="1"/>'
 };
 /* ngsw-bypass: Headwind's service worker would otherwise answer this from cache, skipping sign-on */
@@ -114,6 +115,7 @@ const MODULES=[
   {id:'dns',label:'DNS filter',icon:'shield',url:'https://{{ cfg.DNS_HOST }}/'},
   {id:'remote',label:'Remote support',icon:'remote',url:'/rustdesk'},
   {id:'directory',label:'Directory',icon:'book',url:'/directory'},
+  {id:'playstore',label:'Play Store APKs',icon:'download',url:'/playstore'},
   {id:'admins',label:'Admins',icon:'users',url:'/admins'}
 ];
 const store={get(k){try{return localStorage.getItem(k)}catch(e){return null}},set(k,v){try{localStorage.setItem(k,v)}catch(e){}}};

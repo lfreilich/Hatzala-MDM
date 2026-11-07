@@ -44,7 +44,9 @@ HMDM_CONFIG_IDS = os.getenv("HMDM_CONFIG_IDS", "all")
 TRACCAR_URL = os.getenv("TRACCAR_URL", "http://127.0.0.1:8082").rstrip("/")
 TRACCAR_ADMIN_EMAIL = os.getenv("TRACCAR_ADMIN_EMAIL", "")
 TRACCAR_ADMIN_PASSWORD = _secret("TRACCAR_ADMIN_PASSWORD")
-TRACKING_INTERVAL = int(os.getenv("TRACKING_INTERVAL", "60"))
+TRACKING_INTERVAL = int(os.getenv("TRACKING_INTERVAL", "60"))  # seconds between fixes while a session runs
+# Tracking is on demand only: "Start tracking" runs a session this long, then the app is stopped
+TRACK_SESSION_MINUTES = int(os.getenv("TRACK_SESSION_MINUTES", "10"))
 PCR_PKG = os.getenv("PCR_PKG", "org.hatzbs.pcr")  # in-house PCR app; gets the HCAD email as login_hint
 
 # Nextcloud

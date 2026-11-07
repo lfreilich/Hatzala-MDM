@@ -27,7 +27,7 @@
       </td>
       <td>{% for k, v in d.steps.items() %}<span class="pill ok" title="{{ v }}">{{ k }}</span>{% else %}<span class="mute">waiting for apps to install</span>{% endfor %}</td>
       <td style="white-space:nowrap">
-        {% for a, label in [('track','Start tracking'),('nclogin','Nextcloud login'),('contacts','Contacts login'),('rustdesk','Open RustDesk'),('perms','Grant perms'),('config','Refresh config'),('reboot','Reboot'),('reset','Re-provision')] %}
+        {% for a, label in [('track','Locate (%d min)' % cfg.TRACK_SESSION_MINUTES),('trackstop','Stop tracking'),('nclogin','Nextcloud login'),('contacts','Contacts login'),('rustdesk','Open RustDesk'),('perms','Grant perms'),('config','Refresh config'),('reboot','Reboot'),('reset','Re-provision')] %}
         <form class="inline" method="post" action="/device/{{ d.number }}/action/{{ a }}"
           {% if a in ('reboot','reset') %}onsubmit="return confirm('{{ label }} {{ d.number }}?')"{% endif %}><button>{{ label }}</button></form>
         {% if loop.index == 4 %}<br>{% endif %}

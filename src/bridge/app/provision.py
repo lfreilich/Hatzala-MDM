@@ -4,6 +4,7 @@ import json
 import re
 import secrets
 import string
+import threading
 import time
 from xml.sax.saxutils import escape
 
@@ -43,10 +44,10 @@ def managed_configs(st: dict) -> dict[str, dict]:
             "interval": config.TRACKING_INTERVAL,
             "distance": 0,
             "angle": 30,
-            "heartbeat": 300,
+            "heartbeat": 0,
             "accuracy": "high",
             "buffer": True,
-            "wakelock": True,
+            "wakelock": False,
             "stop_detection": True,
         }
     if _enabled("linphone") and st.get("prov_token") and st.get("ext") and st.get("sip_secret"):
@@ -102,10 +103,36 @@ def send_contacts_login(hw: Headwind, st: dict):
     })
 
 
-def start_tracking(hw: Headwind, st: dict):
-    hw.push(st["number"], "grantPermissions", {"pkg": [PKG["traccar"]]})
+def _traccar_action(hw: Headwind, st: dict, action: str):
     hw.push(st["number"], "intent", {"action": "android.intent.action.VIEW",
-                                      "data": "org.traccar.client://action/start"})
+                                      "data": f"org.traccar.client://action/{action}"})
+
+
+def start_tracking(hw: Headwind, st: dict):
+    """On-demand tracking session; stopped after TRACK_SESSION_MINUTES (timer + sync loop backstop)."""
+    hw.push(st["number"], "grantPermissions", {"pkg": [PKG["traccar"]]})
+    _traccar_action(hw, st, "start")
+    st["steps"]["track_until"] = time.time() + config.TRACK_SESSION_MINUTES * 60
+    number = st["number"]
+
+    def _stop():
+        cur = db.device(number)
+        if cur and cur["steps"].get("track_until") and cur["steps"]["track_until"] <= time.time() + 5:
+            try:
+                stop_tracking(Headwind(), cur)
+                db.save_device(cur)
+                db.log("info", "Tracking session ended", number)
+            except Exception as e:
+                db.log("error", f"Stop tracking: {e}", number)
+
+    t = threading.Timer(config.TRACK_SESSION_MINUTES * 60 + 2, _stop)
+    t.daemon = True
+    t.start()
+
+
+def stop_tracking(hw: Headwind, st: dict):
+    _traccar_action(hw, st, "stop")
+    st["steps"].pop("track_until", None)
 
 
 def run_one_time_steps(hw: Headwind, dev: dict, st: dict):
@@ -120,7 +147,16 @@ def run_one_time_steps(hw: Headwind, dev: dict, st: dict):
         db.log("info", f"One-time step done: {key}", st["number"])
 
     if _enabled("traccar"):
+        if steps.get("traccar_start") and not steps.get("traccar_ondemand"):
+            # Devices set up before on-demand tracking were left tracking continuously: stop them once
+            once("traccar_ondemand", PKG["traccar"], stop_tracking)
+        steps.setdefault("traccar_ondemand", time.time())
+        # First setup gets one short session so the device shows on the map
         once("traccar_start", PKG["traccar"], start_tracking)
+        until = steps.get("track_until")
+        if until and until <= time.time() and PKG["traccar"] in installed:
+            stop_tracking(hw, st)
+            db.log("info", "Tracking session ended", st["number"])
     if _enabled("linphone"):
         once("linphone_perms", PKG["linphone"],
              lambda h, s: h.push(s["number"], "grantPermissions", {"pkg": [PKG["linphone"]]}))

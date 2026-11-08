@@ -111,6 +111,15 @@ def _split_required(apk: APK) -> bool:
     return False
 
 
+def _label(apk: APK, pkg: str) -> str:
+    """App name from resources.arsc; pyaxmlparser can't parse some (e.g. WhatsApp's), so fall back to the package."""
+    try:
+        name = (apk.application or "").strip()
+    except Exception:
+        name = ""
+    return (name if name and not name.startswith("@") else pkg)[:80]
+
+
 def _fetch(pkg: str, actor: str):
     acct = db.kv_get(ACCOUNT_KEY)
     work = tempfile.mkdtemp(prefix="gplay-", dir=config.APK_DIR)
@@ -133,7 +142,7 @@ def _fetch(pkg: str, actor: str):
         with _lock:
             rows = db.kv_get(APPS_KEY, {})
             old = rows.get(pkg, {})
-            rows[pkg] = {"file": fname, "label": (apk.application or pkg)[:80], "version": apk.version_name or str(code),
+            rows[pkg] = {"file": fname, "label": _label(apk, pkg), "version": apk.version_name or str(code),
                          "code": code, "size": os.path.getsize(dest), "split_required": _split_required(apk),
                          "fetched": time.time(), "by": actor, "hmdm_id": old.get("hmdm_id")}
             db.kv_set(APPS_KEY, rows)

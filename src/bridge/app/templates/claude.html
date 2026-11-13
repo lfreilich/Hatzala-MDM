@@ -12,6 +12,10 @@ details.tool pre{white-space:pre-wrap;word-break:break-all;max-height:300px;over
 #prompt{width:100%;min-height:80px;resize:vertical;font:inherit;padding:8px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--ink)}
 .bar{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:8px}
 #hist button{display:block;width:100%;text-align:left;margin-bottom:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#auth{border:1px solid var(--line);border-radius:8px;padding:8px 12px;margin:8px 0;font-size:13px}
+#auth.bad{border-color:#d33;background:rgba(220,50,50,.08)}
+#auth input{width:100%;font:inherit;padding:6px;border:1px solid var(--line);border-radius:6px;background:var(--bg);color:var(--ink);margin-top:6px}
+#auth a{word-break:break-all}
 .wrap{display:grid;grid-template-columns:1fr 260px;gap:16px}@media(max-width:800px){.wrap{grid-template-columns:1fr}}
 </style>
 <div class="wrap">
@@ -19,6 +23,18 @@ details.tool pre{white-space:pre-wrap;word-break:break-all;max-height:300px;over
   <h2>Claude <span class="pill">owners only</span></h2>
   <p class="note">Ask for a change to the dashboard or the stack, in plain words. Claude works on the server itself, the same way as over SSH,
     and can rebuild the bridge. The page may blink while the dashboard restarts; the job keeps going. Every request is logged.</p>
+  <div id="auth"><span id="authLine" class="note">Checking Claude's sign-in...</span>
+    <button id="renew" style="margin-left:8px">Renew sign-in</button>
+    <div id="authFlow" hidden>
+      <ol class="note" style="margin:6px 0;padding-left:18px">
+        <li><a id="authUrl" target="_blank" rel="noopener noreferrer">Open the Claude sign-in page</a> and sign in with the Claude account this server uses.</li>
+        <li>Copy the code it shows and paste it here:</li>
+      </ol>
+      <input id="authCode" placeholder="Paste the code" autocomplete="off" spellcheck="false">
+      <div class="bar"><button class="primary" id="authSend">Finish sign-in</button><button id="authCancel">Cancel</button></div>
+    </div>
+    <div id="authMsg" class="note"></div>
+  </div>
   <div id="log"></div>
   <div class="bar"><span id="state" class="note"></span></div>
   <textarea id="prompt" placeholder="e.g. Add a column with the battery level to the Devices page" maxlength="20000"></textarea>
@@ -85,6 +101,33 @@ async function loadHist(){try{const s=await api('status');const h=$('hist');h.in
       b.title=(x.actor||'')+'\n'+x.prompt;b.onclick=()=>view(x.id);h.appendChild(b)});
     if(s.running&&!job)follow(s.running,true);
   }catch(e){$('hist').textContent=e.message}}
-busy(false);loadHist();
+// ---- Claude sign-in (renew when it has run out) ----
+const AUTH_ERR=/authenticat|oauth token|\b401\b|please run \/login|not logged in|login (has )?expired|invalid api key/i;
+function showAuth(st,lg){const a=$('auth'),line=$('authLine');lg=lg||{};
+  const exp=st&&st.loginExpiresAt?new Date(st.loginExpiresAt):null, expired=exp&&exp<new Date();
+  const ok=st&&st.loggedIn&&!expired;
+  a.classList.toggle('bad',!ok);
+  line.textContent=ok?('Claude signed in as '+(st.email||'?')+(exp?' · sign-in ends '+exp.toLocaleDateString():''))
+    :('Claude\'s sign-in has run out'+(st&&st.error?' ('+st.error+')':'')+'. Renew it to keep using this page.');
+  const waiting=lg.state==='waiting'||lg.state==='checking';
+  $('authFlow').hidden=!waiting;$('renew').hidden=waiting;
+  if(waiting&&lg.url)$('authUrl').href=lg.url;
+  $('authSend').disabled=lg.state==='checking';
+  $('authMsg').textContent=lg.state==='checking'?'Checking the code...':(lg.state==='error'||lg.state==='done')?(lg.message||''):'';
+}
+async function loadAuth(){try{const r=await api('auth');showAuth(r.status,r.login)}catch(e){$('authLine').textContent='Sign-in status: '+e.message}}
+$('renew').onclick=async()=>{$('renew').disabled=true;$('authMsg').textContent='Getting a sign-in link...';
+  try{const r=await api('auth/start',{});showAuth({loggedIn:false},r.login);loadAuth();
+    if(r.login.url)window.open(r.login.url,'_blank','noopener')}
+  catch(e){$('authMsg').textContent=e.message}finally{$('renew').disabled=false}};
+$('authSend').onclick=async()=>{const c=$('authCode').value.trim();if(!c)return;$('authSend').disabled=true;$('authMsg').textContent='Checking the code...';
+  try{const r=await api('auth/code',{code:c});$('authCode').value='';showAuth(r.status,r.login)}
+  catch(e){$('authMsg').textContent=e.message;$('authSend').disabled=false}};
+$('authCode').onkeydown=e=>{if(e.key==='Enter')$('authSend').click()};
+$('authCancel').onclick=async()=>{try{const r=await api('auth/cancel',{});loadAuth()}catch(e){$('authMsg').textContent=e.message}};
+// An auth failure inside a job: re-check the sign-in so the Renew box turns red.
+const _render=render;render=ev=>{_render(ev);const t=ev.type==='result'?(ev.result||''):ev.type==='log'?ev.text:'';
+  if((ev.type==='result'&&ev.is_error||ev.type==='log')&&AUTH_ERR.test(t||''))loadAuth()};
+busy(false);loadHist();loadAuth();
 </script>
 {% endblock %}

@@ -5,6 +5,7 @@ The work happens in hbs-claude-agent (host systemd service on 127.0.0.1:8091); t
 """
 import httpx
 from fastapi import APIRouter, HTTPException, Request
+from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import HTMLResponse, JSONResponse
 
 from . import admins, db
@@ -29,11 +30,11 @@ def _api(request: Request) -> str:
     return actor
 
 
-def _agent(method: str, path: str, **kw):
+def _agent(method: str, path: str, timeout: float = 15, **kw):
     try:
         with open(TOKEN_FILE) as f:
             token = f.read().strip()
-        r = httpx.request(method, AGENT + path, headers={"X-Agent-Token": token}, timeout=15, **kw)
+        r = httpx.request(method, AGENT + path, headers={"X-Agent-Token": token}, timeout=timeout, **kw)
     except (OSError, httpx.HTTPError) as e:
         return JSONResponse({"error": f"The Claude agent on the host isn't answering ({e.__class__.__name__}). "
                                       "Check: systemctl status hbs-claude-agent"}, status_code=502)
@@ -70,3 +71,28 @@ def register(app, templates, ctx):
         body = await request.json()
         db.log("info", f"Claude page job stopped by {actor}")
         return _agent("POST", "/stop", json={"job": str(body.get("job") or "")})
+
+    # Renewing Claude's own sign-in when it has run out (claude auth login, driven through the agent).
+    @app.get("/claude/api/auth", include_in_schema=False)
+    def claude_auth(request: Request):
+        _api(request)
+        return _agent("GET", "/auth", timeout=30)
+
+    @app.post("/claude/api/auth/start", include_in_schema=False)
+    def claude_auth_start(request: Request):
+        actor = _api(request)
+        db.log("info", f"Claude sign-in renewal started by {actor}")
+        return _agent("POST", "/auth/start", timeout=40, json={})
+
+    @app.post("/claude/api/auth/code", include_in_schema=False)
+    async def claude_auth_code(request: Request):
+        actor = _api(request)
+        body = await request.json()
+        r = await run_in_threadpool(_agent, "POST", "/auth/code", 60, json={"code": str(body.get("code") or "")[:1000]})
+        db.log("info", f"Claude sign-in code submitted by {actor} (HTTP {r.status_code})")
+        return r
+
+    @app.post("/claude/api/auth/cancel", include_in_schema=False)
+    def claude_auth_cancel(request: Request):
+        _api(request)
+        return _agent("POST", "/auth/cancel", json={})

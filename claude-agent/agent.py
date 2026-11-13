@@ -9,7 +9,10 @@ reload or a dropped connection doesn't lose it, and closing the browser doesn't 
 import hmac
 import json
 import os
+import pty
+import re
 import secrets
+import select
 import shutil
 import subprocess
 import threading
@@ -132,6 +135,114 @@ def _load(job_id: str) -> dict | None:
     return {"id": job_id, "events": events, "done": True, "session_id": sid}
 
 
+# ---- Claude sign-in renewal (driven from the page) ----
+# `claude auth login` prints a sign-in URL and waits for the code that claude.com shows after sign-in.
+# We run it in a pseudo-terminal, hand the URL to the page, and type the pasted code back in.
+login: dict = {"state": "idle"}  # idle | waiting | checking | done | error
+ANSI = re.compile(r"\x1b\[[0-9;?]*[a-zA-Z]|\x1b\][^\x07]*\x07|\r")
+
+
+def auth_status() -> dict:
+    try:
+        out = subprocess.run([CLAUDE, "auth", "status", "--json"], capture_output=True, text=True, timeout=20,
+                             env={**os.environ, "HOME": "/root"}).stdout
+        st = json.loads(out)
+    except Exception as e:
+        return {"loggedIn": False, "error": f"Couldn't read the sign-in status ({e.__class__.__name__})."}
+    keep = ("loggedIn", "authMethod", "email", "loginExpiresAt", "subscriptionType")
+    return {k: st.get(k) for k in keep}
+
+
+def _login_reader(fd: int, pid: int):
+    buf = ""
+    while True:
+        try:
+            r, _, _ = select.select([fd], [], [], 1)
+            if not r:
+                if login.get("pid") != pid:
+                    break
+                continue
+            d = os.read(fd, 65536)
+        except OSError:
+            break
+        if not d:
+            break
+        buf += ANSI.sub("", d.decode(errors="replace"))
+        login["out"] = buf[-4000:]
+        m = re.search(r"https://\S+/oauth/authorize\?\S+", buf)
+        if m and not login.get("url"):
+            login["url"] = m.group(0)
+    try:
+        _, status = os.waitpid(pid, 0)
+        code = os.waitstatus_to_exitcode(status)
+    except ChildProcessError:
+        code = -1
+    try:
+        os.close(fd)
+    except OSError:
+        pass
+    if login.get("pid") != pid:
+        return
+    if code == 0:
+        login.update(state="done", message="Signed in again.")
+    elif login.get("state") != "idle":
+        tail = [l.split(">", 1)[-1].strip() if l.startswith("Paste code") else l.strip() for l in login.get("out", "").splitlines() if l.strip()]
+        login.update(state="error", message=(tail[-1] if tail else f"Sign-in exited with code {code}.")[:300])
+    login["pid"] = None
+
+
+def login_stop():
+    pid = login.get("pid")
+    login["pid"] = None
+    if pid:
+        try:
+            os.kill(pid, 9)
+        except ProcessLookupError:
+            pass
+
+
+def login_start() -> dict:
+    login_stop()
+    pid, fd = pty.fork()
+    if pid == 0:  # child
+        os.environ.update(HOME="/root", BROWSER="/bin/true", COLUMNS="1000")
+        os.chdir(WORKDIR)
+        os.execv(CLAUDE, [CLAUDE, "auth", "login", "--claudeai"])
+    login.clear()
+    login.update(state="waiting", pid=pid, fd=fd, url=None, out="", started=time.time())
+    threading.Thread(target=_login_reader, args=(fd, pid), daemon=True).start()
+    for _ in range(100):  # the URL usually shows within a second or two
+        if login.get("url") or login.get("pid") != pid:
+            break
+        time.sleep(0.2)
+    if not login.get("url"):
+        login_stop()
+        login.update(state="error", message="Claude didn't give a sign-in link. " + login.get("out", "")[-200:])
+    return login_public()
+
+
+def login_code(code: str) -> dict:
+    if login.get("state") != "waiting" or not login.get("pid"):
+        return {**login_public(), "error": "No sign-in is waiting for a code. Start again."}
+    code = code.strip()
+    if not code or len(code) > 1000 or any(c in code for c in "\r\n\x03\x04"):
+        return {**login_public(), "error": "That doesn't look like a sign-in code."}
+    login["state"] = "checking"
+    os.write(login["fd"], code.encode() + b"\r")
+    for _ in range(150):  # up to 30 s for claude.com to exchange the code
+        if login.get("state") != "checking":
+            break
+        time.sleep(0.2)
+    if login.get("state") == "checking":
+        login_stop()
+        login.update(state="error", message="Sign-in didn't finish in time. Start again.")
+    return login_public()
+
+
+def login_public() -> dict:
+    return {"state": login.get("state", "idle"), "url": login.get("url"), "message": login.get("message")}
+
+
 def running() -> dict | None:
     return next((j for j in jobs.values() if not j["done"]), None)
 
@@ -166,6 +277,8 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/status":
             r = running()
             return self._send(200, {"running": r and r["id"], "history": _history()})
+        if path == "/auth":
+            return self._send(200, {"status": auth_status(), "login": login_public()})
         if path == "/events":
             job = _load(args.get("job", ""))
             if not job:
@@ -196,6 +309,18 @@ class Handler(BaseHTTPRequestHandler):
             threading.Thread(target=_run, args=(job, prompt, body.get("resume") or None, job["actor"]),
                              daemon=True).start()
             return self._send(200, {"job": job_id})
+        if self.path == "/auth/start":
+            if running():
+                return self._send(409, {"error": "Wait for the current job to finish (or stop it) before signing in again."})
+            return self._send(200, {"login": login_start()})
+        if self.path == "/auth/code":
+            res = login_code(str(body.get("code") or ""))
+            return self._send(400 if res.get("error") else 200, {"login": res, "status": auth_status()})
+        if self.path == "/auth/cancel":
+            login_stop()
+            login.clear()
+            login["state"] = "idle"
+            return self._send(200, {"login": login_public()})
         if self.path == "/stop":
             job = jobs.get(body.get("job", ""))
             if job and not job["done"] and job.get("proc"):

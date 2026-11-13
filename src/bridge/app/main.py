@@ -57,6 +57,7 @@ def _start():
     db.conn()
     if os.getenv("BRIDGE_NO_LOOP") != "1":
         threading.Thread(target=_loop, daemon=True).start()
+        playstore.start_auto_updates()
 
 
 # ------------------------------------------------------------------ open endpoints
@@ -147,7 +148,8 @@ def logout_page(request: Request):
 # ------------------------------------------------------------------ dashboard (behind Authelia)
 def _ctx(request: Request, **kw):
     return {"request": request, "cfg": config, "user": request.headers.get("Remote-Email", ""),
-            "last_sync": db.kv_get("last_sync_ok"), "sync_error": db.kv_get("last_sync_error"), **kw}
+            "last_sync": db.kv_get("last_sync_ok"), "sync_error": db.kv_get("last_sync_error"),
+            "play_notices": playstore.notices(), **kw}
 
 
 DEVICE_NUMBER = re.compile(r"^[A-Za-z0-9_.-]{1,32}$")
@@ -531,7 +533,9 @@ def playstore_page(request: Request, ok: str = "", error: str = ""):
     jobs = playstore.jobs()
     return templates.TemplateResponse("playstore.html", _ctx(
         request, account=playstore.account(), apps=playstore.apps(), jobs=jobs, configs=configs,
-        running=any(j.get("state") == "running" for j in jobs.values()), device=playstore.DEVICE,
+        running=any(j.get("state") == "running" for j in jobs.values()) or (playstore.last_check() or {}).get("state") == "running",
+        device=playstore.DEVICE, last_check=playstore.last_check(), auto_update=playstore.auto_enabled(),
+        update_hours=playstore.UPDATE_HOURS,
         owner=admins.is_owner(_actor(request)), ok=ok, error=error), headers={"Cache-Control": "no-store"})
 
 
@@ -573,6 +577,32 @@ async def playstore_publish(request: Request):
         return _play_back(ok=f"{pkg}: " + playstore.publish(pkg, ids, _actor(request)))
     except Exception as e:
         return _play_back(error=f"{pkg}: {str(e)[:400]}")
+
+
+@app.post("/playstore/check")
+def playstore_check(request: Request):
+    try:
+        playstore.start_check(_actor(request))
+        return _play_back(ok="Checking every app for updates. Newer versions are downloaded and rolled out to the "
+                             "phones that already have them. This page refreshes until it's done.")
+    except Exception as e:
+        return _play_back(error=str(e)[:400])
+
+
+@app.post("/playstore/auto")
+def playstore_auto(request: Request, on: str = Form("")):
+    try:
+        admins.require_owner(_actor(request), "change automatic updates")
+        playstore.set_auto(on == "1", _actor(request))
+        return _play_back(ok=f"Automatic updates turned {'on' if on == '1' else 'off'}.")
+    except Exception as e:
+        return _play_back(error=str(e)[:400])
+
+
+@app.post("/playstore/updates/dismiss")
+def playstore_dismiss(request: Request):
+    playstore.dismiss_notices(_actor(request))
+    return _play_back()
 
 
 @app.post("/playstore/forget")

@@ -117,6 +117,11 @@ class Headwind:
             "applicationId": app_id, "version": version, "versionCode": version_code, "url": url,
         })
 
+    def upgrade_config_app(self, config_id: int, app_id: int):
+        """Point the configuration at the app's newest version (Headwind's own 'Upgrade' button)."""
+        self._req("PUT", "/private/configurations/application/upgrade",
+                  json={"configurationId": config_id, "applicationId": app_id})
+
     def app_configurations(self, app_id: int) -> list[dict]:
         return self._req("GET", f"/private/applications/configurations/{app_id}") or []
 

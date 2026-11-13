@@ -52,6 +52,38 @@
   <p class="mute" style="margin-bottom:0">Google Play sends the version for a <code>{{ device }}</code> phone (64-bit ARM). The APK is then kept on this server; <b>Publish</b> adds it to Headwind and, if you tick configurations, installs it on those phones.</p>
 </div>
 
+{% if play_notices %}
+<div class="card" style="border-color:var(--acc)">
+  <h2>Updated automatically</h2>
+  <table>
+    {% for n in play_notices %}
+    <tr><td><b>{{ n.label }}</b><br><code>{{ n.pkg }}</code></td>
+      <td>{{ n.from }} → <b>{{ n.to }}</b><br><span class="mute" data-ts="{{ n.at }}"></span></td>
+      <td class="{{ '' if n.ok else 'err' }}">{{ n.result }}</td></tr>
+    {% endfor %}
+  </table>
+  <form method="post" action="/playstore/updates/dismiss" style="margin-top:8px"><button>Got it, hide these</button></form>
+</div>
+{% endif %}
+
+<div class="card">
+  <h2>Keep apps up to date</h2>
+  <p class="mute">Checks every app below against Google Play. When there is a newer version it is downloaded, added to Headwind,
+    and the configurations that install the app are moved to it, so phones update by themselves. You'll see what changed above.
+    Apps not yet published are only downloaded. Apps Google ships as split APKs are downloaded but not rolled out.</p>
+  <form class="inline" method="post" action="/playstore/check" onsubmit="var b=this.querySelector('button');b.disabled=true;b.textContent='Starting...'">
+    <button class="primary" {% if not account or not apps or (last_check and last_check.state == 'running') %}disabled{% endif %}>Check for updates now</button></form>
+  {% if owner %}
+  <form class="inline" method="post" action="/playstore/auto">
+    <input type="hidden" name="on" value="{{ '' if auto_update else '1' }}">
+    <button>{{ 'Turn off' if auto_update else 'Turn on' }} automatic updates</button></form>
+  {% endif %}
+  <p class="mute" style="margin-bottom:0">Automatic check: {% if auto_update and update_hours > 0 %}<b>on</b>, every {{ update_hours | round(1) | string | replace('.0','') }} h{% else %}<b>off</b>{% endif %}.
+    {% if last_check %}Last check{% if last_check.state == 'running' %} <span class="pill">running</span> started{% endif %}
+      <span data-ts="{{ last_check.at }}"></span> by {{ last_check.by }}{% if last_check.summary %}: {{ last_check.summary }}{% endif %}.
+    {% else %}Never checked yet.{% endif %}</p>
+</div>
+
 {% set active = jobs.items() | selectattr('1.state', 'ne', 'done') | list %}
 {% if active %}
 <div class="card">

@@ -263,6 +263,22 @@ def _register_device(number: str, user_name: str, user_email: str, ext: str, hca
     threading.Thread(target=_sync, kwargs={"wait": True}, daemon=True).start()
 
 
+def _relink_device(number: str, user_name: str, user_email: str):
+    """Link user on a device that is already in Headwind: make sure it carries the linked extension so sync
+    reads its SIP password and sends Linphone its setup link (a device made without an extension never would)."""
+    st = db.device(number) or {"number": number, "steps": {}}
+    other = db.q("SELECT number FROM devices WHERE ext=? AND number<>?", (number, number))
+    if other:
+        raise RuntimeError(f"extension {number} is already used by device {other[0]['number']}")
+    if st.get("ext") != number:
+        st.update(ext=number, sip_secret=None, prov_token=None)  # the old extension's password no longer applies
+        db.log("info", f"Linked device now uses extension {number}; Linphone will be set up for it", number)
+    st.update(user_name=st.get("user_name") or user_name, user_email=user_email or st.get("user_email"))
+    if not st.get("nc_user"):
+        st["nc_user"] = provision.user_account(st["user_name"], number)
+    db.save_device(st)
+
+
 @app.get("/add-device", response_class=HTMLResponse)
 def add_device_page(request: Request, number: str = "", existed: int = 0, error: str = "", ok: str = "",
                     legacy: int = 0, wifi: int = 0, ip: int = 0):
@@ -423,6 +439,7 @@ def link_user(login: str = Form(...), email: str = Form(""), config_id: int = Fo
             hw.create_device(login, name[:100], config_id, custom1=login)
             _register_device(login, name[:100], email, login, hcad_email)
         else:
+            _relink_device(login, name[:100], email)
             _set_hcad_email(login, hcad_email)
         if hcad_email:
             db.x("UPDATE linked_users SET hcad_email=? WHERE login=?", (hcad_email, login))

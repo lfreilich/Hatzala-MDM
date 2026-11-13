@@ -187,10 +187,17 @@ def push_linphone_config(hw: Headwind, st: dict, installed: set[str]):
     if steps.get("linphone_cfg_id") != want:   # new device, or extension changed
         steps.update(linphone_cfg_id=want, linphone_cfg_sent=0, linphone_cfg_tries=0)
         steps.pop("linphone_fetched", None)
+        steps.pop("linphone_gave_up", None)
     if steps.get("linphone_fetched"):
         return
     tries = steps.get("linphone_cfg_tries", 0)
-    if tries >= LINPHONE_TRIES or time.time() - steps.get("linphone_cfg_sent", 0) < LINPHONE_RETRY:
+    if tries >= LINPHONE_TRIES:
+        if not steps.get("linphone_gave_up"):
+            steps["linphone_gave_up"] = time.time()
+            db.log("error", f"Linphone never fetched its setup for extension {st['ext']} after {tries} tries. "
+                            "Open Linphone on the phone, or use Re-provision on the Devices page.", st["number"])
+        return
+    if time.time() - steps.get("linphone_cfg_sent", 0) < LINPHONE_RETRY:
         return
     hw.push(st["number"], "intent", {"action": "android.intent.action.VIEW",
                                      "data": "linphone-config:" + linphone_config_uri(st)})

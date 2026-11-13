@@ -120,40 +120,55 @@ def _label(apk: APK, pkg: str) -> str:
     return (name if name and not name.startswith("@") else pkg)[:80]
 
 
-def _fetch(pkg: str, actor: str):
+def _download(pkg: str, work: str) -> tuple[str, APK]:
+    """Fetch the current Play version of pkg into work; returns (base apk path, parsed APK)."""
     acct = db.kv_get(ACCOUNT_KEY)
+    if not acct:
+        raise RuntimeError("No Google account is connected.")
+    _run(["-a", pkg, "-d", "google-play", "-e", acct["email"], "-t", acct["aas_token"], "--accept-tos",
+          "-o", f"device={DEVICE},locale={LOCALE}", work], timeout=900)
+    found = glob.glob(os.path.join(work, "**", "*.apk"), recursive=True)
+    base = [f for f in found if os.path.basename(f) in (f"{pkg}.apk", "base.apk")] or found
+    if not base:
+        raise RuntimeError("Google Play returned no APK. The app may be paid, region-locked, "
+                           "or not offered for this device type.")
+    apk = APK(base[0])
+    if apk.package != pkg:
+        raise RuntimeError(f"Downloaded package is {apk.package}, expected {pkg}")
+    return base[0], apk
+
+
+def _store(pkg: str, path: str, apk: APK, actor: str) -> dict:
+    """Move a downloaded APK into APK_DIR and record it; drops the previous file unless devices still use it."""
+    code = int(apk.version_code)
+    fname = f"{pkg}-{code}.apk"
+    dest = os.path.join(config.APK_DIR, fname)
+    shutil.move(path, dest)
+    os.chmod(dest, 0o644)
+    with _lock:
+        rows = db.kv_get(APPS_KEY, {})
+        old = rows.get(pkg, {})
+        row = {**old, "file": fname, "label": _label(apk, pkg), "version": apk.version_name or str(code),
+               "code": code, "size": os.path.getsize(dest), "split_required": _split_required(apk),
+               "fetched": time.time(), "by": actor}
+        rows[pkg] = row
+        db.kv_set(APPS_KEY, rows)
+    if old.get("file") and old["file"] != fname and old.get("published_file") != old["file"]:
+        try:
+            os.remove(os.path.join(config.APK_DIR, old["file"]))
+        except OSError:
+            pass
+    return row
+
+
+def _fetch(pkg: str, actor: str):
     work = tempfile.mkdtemp(prefix="gplay-", dir=config.APK_DIR)
     try:
-        _run(["-a", pkg, "-d", "google-play", "-e", acct["email"], "-t", acct["aas_token"], "--accept-tos",
-              "-o", f"device={DEVICE},locale={LOCALE}", work], timeout=900)
-        found = glob.glob(os.path.join(work, "**", "*.apk"), recursive=True)
-        base = [f for f in found if os.path.basename(f) in (f"{pkg}.apk", "base.apk")] or found
-        if not base:
-            raise RuntimeError("Google Play returned no APK. The app may be paid, region-locked, "
-                               "or not offered for this device type.")
-        apk = APK(base[0])
-        if apk.package != pkg:
-            raise RuntimeError(f"Downloaded package is {apk.package}, expected {pkg}")
-        code = int(apk.version_code)
-        fname = f"{pkg}-{code}.apk"
-        dest = os.path.join(config.APK_DIR, fname)
-        shutil.move(base[0], dest)
-        os.chmod(dest, 0o644)
-        with _lock:
-            rows = db.kv_get(APPS_KEY, {})
-            old = rows.get(pkg, {})
-            rows[pkg] = {"file": fname, "label": _label(apk, pkg), "version": apk.version_name or str(code),
-                         "code": code, "size": os.path.getsize(dest), "split_required": _split_required(apk),
-                         "fetched": time.time(), "by": actor, "hmdm_id": old.get("hmdm_id")}
-            db.kv_set(APPS_KEY, rows)
-        if old.get("file") and old["file"] != fname and not old.get("published_file") == old["file"]:
-            try:
-                os.remove(os.path.join(config.APK_DIR, old["file"]))
-            except OSError:
-                pass
-        note = " (needs split APKs, may not install alone)" if rows[pkg]["split_required"] else ""
-        db.log("info", f"Play Store: fetched {pkg} {rows[pkg]['version']} ({code}) for {actor}{note}")
-        _set_job(pkg, "done", f"Fetched version {rows[pkg]['version']}{note}")
+        path, apk = _download(pkg, work)
+        row = _store(pkg, path, apk, actor)
+        note = " (needs split APKs, may not install alone)" if row["split_required"] else ""
+        db.log("info", f"Play Store: fetched {pkg} {row['version']} ({row['code']}) for {actor}{note}")
+        _set_job(pkg, "done", f"Fetched version {row['version']}{note}")
     except Exception as e:
         msg = _redact(str(e))
         db.log("error", f"Play Store: fetching {pkg} failed: {msg}")
@@ -192,9 +207,29 @@ def forget(pkg: str, actor: str):
 
 
 # ------------------------------------------------------------------ Headwind
+def _upgrade_links(hw: Headwind, app_id: int, only: list[int] | None = None) -> list[str]:
+    """Move configurations that install this app (action 1) from an older version onto the newest one, and tell
+    their phones to re-read the configuration so they install it now. Returns the configuration names moved."""
+    moved, cfg_ids = [], set()
+    for link in hw.app_configurations(app_id):
+        cid = link.get("configurationId")
+        if link.get("action") == 1 and link.get("outdated") and (only is None or cid in only):
+            hw.upgrade_config_app(cid, app_id)
+            moved.append(link.get("configurationName") or str(cid))
+            cfg_ids.add(cid)
+    if cfg_ids:
+        for d in hw.devices():
+            if d.get("configurationId") in cfg_ids and d.get("number"):
+                try:
+                    hw.push(d["number"], "configUpdated")
+                except Exception:
+                    pass  # the phone picks the change up on its next scheduled check anyway
+    return moved
+
+
 def publish(pkg: str, config_ids: list[int], actor: str) -> str:
     """Add the APK to Headwind (new app or new version) and set it to install on the chosen configurations.
-    Only touches the application and its links; never PUTs a configuration."""
+    Only touches the application, its links and their version; never PUTs a configuration."""
     rows = db.kv_get(APPS_KEY, {})
     row = rows.get(pkg)
     if not row:
@@ -219,6 +254,9 @@ def publish(pkg: str, config_ids: list[int], actor: str) -> str:
         if missing:
             hw.link_app(app_id, missing)
         what += f"; installs on {len(config_ids)} configuration(s)"
+    moved = _upgrade_links(hw, app_id, config_ids or None) if existing else []
+    if moved:
+        what += f"; {', '.join(moved)} moved to {row['version']}"
     with _lock:
         rows = db.kv_get(APPS_KEY, {})
         if pkg in rows:
@@ -226,3 +264,141 @@ def publish(pkg: str, config_ids: list[int], actor: str) -> str:
             db.kv_set(APPS_KEY, rows)
     db.log("info", f"Play Store: {pkg} {row['version']} published by {actor}: {what}")
     return what
+
+
+# ------------------------------------------------------------------ update check
+UPDATE_HOURS = float(os.getenv("GPLAY_UPDATE_HOURS", "24"))  # how often the automatic check runs
+AUTO_KEY = "gplay:auto_update"   # bool, default on
+CHECK_KEY = "gplay:last_check"   # {at, by, state: running|done, summary}
+NOTICE_KEY = "gplay:updates"     # [{pkg, label, from, to, at, result, ok}] newest first; shown until dismissed
+_check_lock = threading.Lock()
+
+
+def auto_enabled() -> bool:
+    return db.kv_get(AUTO_KEY, True) is not False
+
+
+def set_auto(on: bool, actor: str):
+    db.kv_set(AUTO_KEY, bool(on))
+    db.log("info", f"Play Store: automatic updates turned {'on' if on else 'off'} by {actor}")
+
+
+def last_check() -> dict | None:
+    return db.kv_get(CHECK_KEY)
+
+
+def notices() -> list[dict]:
+    return db.kv_get(NOTICE_KEY, [])
+
+
+def dismiss_notices(actor: str):
+    db.kv_set(NOTICE_KEY, [])
+
+
+def _notify(item: dict):
+    with _lock:
+        n = db.kv_get(NOTICE_KEY, [])
+        db.kv_set(NOTICE_KEY, ([item] + n)[:50])
+
+
+def _check_one(pkg: str, actor: str) -> str:
+    """Download pkg's current Play version; if it is newer than ours, keep it and roll it out where the old one was.
+    Returns a one-line result."""
+    old = db.kv_get(APPS_KEY, {}).get(pkg)
+    if not old:
+        return "not in the list"
+    _set_job(pkg, "running", "Checking Google Play for a newer version…")
+    work = tempfile.mkdtemp(prefix="gplay-", dir=config.APK_DIR)
+    try:
+        path, apk = _download(pkg, work)
+        code = int(apk.version_code)
+        if code <= int(old.get("code") or 0):
+            _set_job(pkg, "done", f"Up to date ({old['version']})")
+            return f"up to date ({old['version']})"
+        row = _store(pkg, path, apk, actor)
+        frm, to = old.get("version"), row["version"]
+        ok = True
+        if not old.get("hmdm_id"):
+            result = "new version downloaded; this app isn't in Headwind, so press Publish to roll it out"
+        elif row["split_required"]:
+            ok = False
+            result = ("new version downloaded but NOT rolled out: Google now ships it as split APKs, "
+                      "which won't install alone. Phones keep " + str(frm))
+        else:
+            result = publish(pkg, [], actor)
+        _notify({"pkg": pkg, "label": row["label"], "from": frm, "to": to, "at": time.time(),
+                 "result": result, "ok": ok})
+        db.log("info" if ok else "warning", f"Play Store update: {pkg} {frm} -> {to}: {result}")
+        _set_job(pkg, "done", f"Updated {frm} → {to}")
+        return f"{frm} → {to}: {result}"
+    except Exception as e:
+        msg = _redact(str(e))
+        db.log("error", f"Play Store update check for {pkg} failed: {msg}")
+        _set_job(pkg, "error", f"Update check failed: {msg}")
+        return f"check failed: {msg[:200]}"
+    finally:
+        shutil.rmtree(work, ignore_errors=True)
+
+
+def check_updates(actor: str) -> dict:
+    """Check every app on the list against Google Play; download, publish and roll out any newer version.
+    Runs in the calling thread; returns {pkg: result}."""
+    if not _check_lock.acquire(blocking=False):
+        raise ValueError("An update check is already running.")
+    try:
+        db.kv_set(CHECK_KEY, {"at": time.time(), "by": actor, "state": "running", "summary": ""})
+        results = {}
+        if db.kv_get(ACCOUNT_KEY):
+            for pkg in list(db.kv_get(APPS_KEY, {})):
+                if jobs().get(pkg, {}).get("state") == "running":
+                    results[pkg] = "skipped: a download is already running"
+                    continue
+                results[pkg] = _check_one(pkg, actor)
+        updated = sum(1 for r in results.values() if "→" in r)
+        failed = sum(1 for r in results.values() if r.startswith("check failed"))
+        summary = (f"{len(results)} app(s) checked, {updated} updated" + (f", {failed} failed" if failed else "")
+                   if db.kv_get(ACCOUNT_KEY) else "No Google account connected")
+        db.kv_set(CHECK_KEY, {"at": time.time(), "by": actor, "state": "done", "summary": summary})
+        db.log("info", f"Play Store update check by {actor}: {summary}")
+        return results
+    finally:
+        _check_lock.release()
+
+
+def start_check(actor: str):
+    if not db.kv_get(ACCOUNT_KEY):
+        raise ValueError("Connect a Google account first.")
+    if _check_lock.locked():
+        raise ValueError("An update check is already running.")
+    threading.Thread(target=lambda: _safe_check(actor), daemon=True).start()
+
+
+def _safe_check(actor: str):
+    try:
+        check_updates(actor)
+    except Exception as e:
+        db.log("error", f"Play Store update check failed: {_redact(str(e))}")
+
+
+def _auto_loop():
+    time.sleep(120)
+    while True:
+        try:
+            last = (db.kv_get(CHECK_KEY) or {}).get("at", 0)
+            if auto_enabled() and db.kv_get(ACCOUNT_KEY) and time.time() - last >= UPDATE_HOURS * 3600:
+                _safe_check("automatic check")
+        except Exception as e:
+            print(f"playstore auto-update: {e}", flush=True)
+        time.sleep(600)
+
+
+def start_auto_updates():
+    c = db.kv_get(CHECK_KEY)
+    if c and c.get("state") == "running":  # the bridge restarted mid-check
+        db.kv_set(CHECK_KEY, {**c, "state": "done", "summary": "interrupted by a restart"})
+    j = db.kv_get(JOBS_KEY, {})
+    if any(v.get("state") == "running" for v in j.values()):
+        db.kv_set(JOBS_KEY, {k: ({**v, "state": "error", "message": "Interrupted by a restart"}
+                                 if v.get("state") == "running" else v) for k, v in j.items()})
+    if UPDATE_HOURS > 0:
+        threading.Thread(target=_auto_loop, daemon=True).start()

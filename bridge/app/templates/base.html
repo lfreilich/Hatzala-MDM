@@ -44,7 +44,10 @@ code{font-size:12px;background:var(--bg);padding:1px 4px;border-radius:4px;word-
     {% if sync_error %}<span class="err" title="{{ sync_error }}">· sync error</span>{% endif %}
     · <a class="btn" href="https://{{ cfg.OPS_HOST }}/logout">Log out</a></span>
 </header>
-<main>{% block body %}{% endblock %}</main>
+<main>{% if play_notices and request.url.path != '/playstore' %}<div class="card" style="border-color:var(--acc)">
+  <b>Play Store:</b> {{ play_notices | length }} app(s) got a new version from Google Play
+  ({% for n in play_notices[:3] %}{{ n.label }} {{ n.to }}{% if not loop.last %}, {% endif %}{% endfor %}{% if play_notices | length > 3 %}, …{% endif %}).
+  <a href="/playstore">See details</a></div>{% endif %}{% block body %}{% endblock %}</main>
 <script>
 /* hbs-embed: top-level visits go to the portal; inside the portal the shell provides the navigation */
 if(window===top&&location.pathname==='/')location.replace('/home');

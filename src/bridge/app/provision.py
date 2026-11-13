@@ -228,8 +228,22 @@ def ensure_nextcloud(nc: Nextcloud, dev: dict, st: dict):
         if nc.user_exists(uid):
             nc.set_password(uid, pw)
         else:
-            nc.create_user(uid, pw, st.get("user_name") or _name(dev), config.NC_DEVICE_GROUP,
-                           st.get("user_email") or "")
+            base = uid
+            for n in range(1, 10):
+                if n > 1:  # a deleted user's folder blocks reusing a name; take the next free one
+                    uid = f"{base}-{n}"
+                    if nc.user_exists(uid) or db.q("SELECT 1 FROM devices WHERE nc_user=? AND number<>?",
+                                                   (uid, st["number"])):
+                        continue
+                try:
+                    nc.create_user(uid, pw, st.get("user_name") or _name(dev), config.NC_DEVICE_GROUP,
+                                   st.get("user_email") or "")
+                    break
+                except Exception as e:
+                    if "files already exist" not in str(e) or n == 9:
+                        raise
+            if uid != base:
+                db.log("info", f"Nextcloud name {base} is blocked by an old user's files; using {uid}", st["number"])
         st.update(nc_user=uid, nc_password=pw, nc_app_password=None)
         st["steps"].pop("nextcloud_login", None)
         st["steps"].pop("contacts_login", None)
@@ -503,12 +517,18 @@ def sync_all(force_apps=False):
         app_ids = {**app_ids, **apps.register_all(hw)}
         db.kv_set("app_ids", app_ids)
         db.kv_set("apps_bootstrap_ts", time.time())
-    if config.PCR_PKG not in app_ids and db.q("SELECT 1 FROM devices WHERE hcad_email IS NOT NULL LIMIT 1"):
-        # PCR is uploaded to Headwind by hand, so look up its id rather than registering it
-        pcr = next((a for a in hw.applications() if a.get("pkg") == config.PCR_PKG and a.get("id")), None)
-        if pcr:
-            app_ids[config.PCR_PKG] = pcr["id"]
-            db.kv_set("app_ids", app_ids)
+    # Apps re-uploaded or deleted in Headwind get new ids; a stale id makes Headwind refuse every device's
+    # settings (foreign key error), so check the cached ids against Headwind on every run.
+    live = {}
+    for a in hw.applications():
+        if a.get("id") and a.get("pkg"):
+            live.setdefault(a["pkg"], a["id"])
+    fixed = {pkg: live[pkg] for pkg in list(app_ids) + [config.PCR_PKG] if pkg in live}
+    if fixed != app_ids:
+        changed = sorted(p for p in set(app_ids) | set(fixed) if app_ids.get(p) != fixed.get(p))
+        db.log("info", "Headwind app ids refreshed: " + ", ".join(f"{p} {app_ids.get(p)} -> {fixed.get(p)}" for p in changed))
+        app_ids = fixed
+        db.kv_set("app_ids", app_ids)
 
     tc = Traccar() if _enabled("traccar") else None
     nc = Nextcloud() if (_enabled("nextcloud") or _enabled("davx5")) else None
